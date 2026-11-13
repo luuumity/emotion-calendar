@@ -10,7 +10,13 @@ import { errorMessage } from '../context/AuthContext'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-type DragState = { score: number; x: number; y: number; over: boolean }
+type DragState =
+  | { kind: 'create'; score: number; x: number; y: number; over: boolean }
+  | { kind: 'delete'; id: number; score: number; index: number; x: number; y: number; over: boolean }
+
+type DragSession =
+  | { kind: 'create'; score: number; startX: number; startY: number; moved: boolean }
+  | { kind: 'delete'; id: number; score: number; index: number; startX: number; startY: number; moved: boolean }
 
 function sortById(records: RecordItem[]) {
   return records.slice().sort((a, b) => a.id - b.id)
@@ -37,7 +43,9 @@ export function DayPage() {
   const [toast, setToast] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
   const machineRef = useRef<HTMLDivElement | null>(null)
-  const dragRef = useRef<{ score: number; startX: number; startY: number; moved: boolean } | null>(null)
+  const dragRef = useRef<DragSession | null>(null)
+  const deleteZoneRef = useRef<HTMLDivElement | null>(null)
+  const noteCardRef = useRef<HTMLElement | null>(null)
   const draftRef = useRef(noteDraft)
   const selectedNoteRef = useRef<string | undefined>(undefined)
   const saveChainRef = useRef<Promise<void>>(Promise.resolve())
@@ -175,6 +183,10 @@ export function DayPage() {
       setRecords((prev) => sortById([...prev, res.record]))
       handleSelect(res.record.id)
       setToast(`已投进一颗 ${score} 分 · ${scoreLabel(score)}，可以写理由了`)
+      // 手机上把理由框带到视野里，避免用户往下滑时误触机器底座
+      window.setTimeout(() => {
+        noteCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }, 80)
     } catch (err) {
       setToast(errorMessage(err))
     }
@@ -214,24 +226,40 @@ export function DayPage() {
     setSelectedId(nextId)
   }
 
-  async function handleDelete() {
-    if (!canEdit || !selected) return
-    const index = balls.find((b) => b.id === selected.id)?.index ?? ''
-    if (!window.confirm(`确定要删掉第 ${index} 颗扭蛋吗？`)) return
+  async function deleteBall(id: number) {
+    if (!canEdit) return
+    const index = balls.find((b) => b.id === id)?.index
     try {
-      await api.deleteRecord(selected.id)
-      setRecords((prev) => prev.filter((r) => r.id !== selected.id))
-      setSelectedId(null)
-      setNoteDraft('')
-      setSaveState('idle')
-      setToast('这颗扭蛋已删除')
+      await api.deleteRecord(id)
+      setRecords((prev) => prev.filter((r) => r.id !== id))
+      if (selectedId === id) {
+        setSelectedId(null)
+        setNoteDraft('')
+        setDirty(false)
+        setSaveState('idle')
+      }
+      setToast(index ? `第 ${index} 颗已删除` : '这颗扭蛋已删除')
     } catch (err) {
       setToast(errorMessage(err))
     }
   }
 
+  async function handleDelete() {
+    if (!canEdit || !selected) return
+    const index = balls.find((b) => b.id === selected.id)?.index ?? ''
+    if (!window.confirm(`确定要删掉第 ${index} 颗扭蛋吗？`)) return
+    await deleteBall(selected.id)
+  }
+
   function isOverMachine(x: number, y: number) {
     const el = machineRef.current
+    if (!el) return false
+    const rect = el.getBoundingClientRect()
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+  }
+
+  function isOverDeleteZone(x: number, y: number) {
+    const el = deleteZoneRef.current
     if (!el) return false
     const rect = el.getBoundingClientRect()
     return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
@@ -248,25 +276,67 @@ export function DayPage() {
     const state = dragRef.current
     if (!state) return
     if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 6) state.moved = true
-    setDrag({ score: state.score, x: event.clientX, y: event.clientY, over: isOverMachine(event.clientX, event.clientY) })
+    if (state.kind === 'create') {
+      setDrag({
+        kind: 'create',
+        score: state.score,
+        x: event.clientX,
+        y: event.clientY,
+        over: isOverMachine(event.clientX, event.clientY)
+      })
+    } else {
+      if (!state.moved) return
+      setDrag({
+        kind: 'delete',
+        id: state.id,
+        score: state.score,
+        index: state.index,
+        x: event.clientX,
+        y: event.clientY,
+        over: isOverDeleteZone(event.clientX, event.clientY)
+      })
+    }
   }
 
   function handlePointerUp(event: PointerEvent) {
     const state = dragRef.current
     if (!state) return
-    const over = isOverMachine(event.clientX, event.clientY)
-    const tapped = !state.moved
-    endDrag()
-    if (over || tapped) {
-      // 点击和拖进扭蛋机都只负责新建，不会改到已选中的扭蛋
-      void createBall(state.score)
+    if (state.kind === 'create') {
+      const over = isOverMachine(event.clientX, event.clientY)
+      const tapped = !state.moved
+      endDrag()
+      if (over || tapped) {
+        // 点击和拖进扭蛋机都只负责新建，不会改到已选中的扭蛋
+        void createBall(state.score)
+      }
+      return
     }
+    const over = isOverDeleteZone(event.clientX, event.clientY)
+    endDrag()
+    if (over) void deleteBall(state.id)
   }
 
   function startDrag(score: number, event: ReactPointerEvent) {
     if (!canEdit) return
-    dragRef.current = { score, startX: event.clientX, startY: event.clientY, moved: false }
-    setDrag({ score, x: event.clientX, y: event.clientY, over: isOverMachine(event.clientX, event.clientY) })
+    dragRef.current = { kind: 'create', score, startX: event.clientX, startY: event.clientY, moved: false }
+    setDrag({ kind: 'create', score, x: event.clientX, y: event.clientY, over: isOverMachine(event.clientX, event.clientY) })
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+  }
+
+  function startDeleteDrag(record: RecordItem, event: ReactPointerEvent) {
+    if (!canEdit) return
+    const index = balls.find((b) => b.id === record.id)?.index ?? 0
+    event.preventDefault()
+    dragRef.current = {
+      kind: 'delete',
+      id: record.id,
+      score: record.score,
+      index,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false
+    }
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
   }
@@ -367,7 +437,7 @@ export function DayPage() {
         </section>
 
         <aside className="day-side">
-          <section className="card record-card">
+          <section className="card record-card" ref={noteCardRef}>
             <div className="record-head">
               <div>
                 <span className="record-kicker">
@@ -396,7 +466,12 @@ export function DayPage() {
             {selected ? (
               <>
                 <div className="score-hero">
-                  <div className="capsule-preview" style={{ background: scoreColor(selected.score) }}>
+                  <div
+                    className={canEdit ? 'capsule-preview draggable' : 'capsule-preview'}
+                    style={{ background: scoreColor(selected.score) }}
+                    onPointerDown={(event) => startDeleteDrag(selected, event)}
+                    title={canEdit ? '按住拖到下方删除' : undefined}
+                  >
                     <span style={{ color: isDark(selected.score) ? '#fffaf2' : '#2f2a25' }}>{scoreLabel(selected.score)}</span>
                   </div>
                   <div className="score-meta">
@@ -453,6 +528,7 @@ export function DayPage() {
 
                 {editable && (
                   <div className="record-actions">
+                    {canEdit && <span className="drag-delete-hint">按住上方色球拖到下方可删除</span>}
                     <button type="button" className="ghost-btn danger small" onClick={handleDelete}>
                       删除这一颗
                     </button>
@@ -493,6 +569,7 @@ export function DayPage() {
               <li>点一下或拖进扭蛋机，同一天可以投很多颗，月视图取平均。</li>
               <li>新建后会自动打开理由框，补上当时的理由；点开任意一颗也能改理由。</li>
               <li>颜色和分值创建后不能改，想换就删掉重投；选中只用于写理由或删除。</li>
+              <li>按住选中的色球拖到下方删除区，松手即可快速删掉。</li>
             </ol>
           </section>
         </aside>
@@ -500,12 +577,20 @@ export function DayPage() {
 
       {loading && <div className="loading-hint">正在装填扭蛋机…</div>}
       {toast && <div className="toast">{toast}</div>}
+      {drag?.kind === 'delete' && (
+        <div ref={deleteZoneRef} className={drag.over ? 'delete-zone over' : 'delete-zone'}>
+          <span>松手删除</span>
+          <small>
+            第 {drag.index} 颗 · {drag.score} 分
+          </small>
+        </div>
+      )}
       {drag && (
         <div
           className={drag.over ? 'drag-ghost over' : 'drag-ghost'}
           style={{ left: drag.x, top: drag.y, background: scoreColor(drag.score) }}
         >
-          {drag.score}
+          {drag.kind === 'create' ? drag.score : drag.index}
         </div>
       )}
     </div>

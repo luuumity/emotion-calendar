@@ -48,7 +48,7 @@ export function computeCompat(mine: RecordItem[], theirs: RecordItem[]): CompatR
       alignment: null,
       avgDiff: null,
       descriptor: '还没有共同记录',
-      hint: '两个人都记录同一天后，才能算出同频指数。',
+      hint: '两个人都记录同一天后，才能算出同感指数。',
       trend: null,
       series
     }
@@ -58,7 +58,7 @@ export function computeCompat(mine: RecordItem[], theirs: RecordItem[]): CompatR
   const alignment = Math.round(100 - avgDiff)
 
   let descriptor = '需要聊聊'
-  if (alignment >= 85) descriptor = '同频默契'
+  if (alignment >= 85) descriptor = '同感默契'
   else if (alignment >= 70) descriptor = '渐入佳境'
   else if (alignment >= 55) descriptor = '正在磨合'
   else if (alignment >= 40) descriptor = '温差有点大'

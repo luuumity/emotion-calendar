@@ -233,7 +233,7 @@ export function MonthPage() {
           />
         )}
         <StatCard
-          label="同频指数"
+          label="同感指数"
           value={comparePerson && compat.alignment != null ? compat.alignment : '—'}
           hint={comparePerson ? compat.descriptor : '授权后可见'}
           tone="coral"
@@ -353,7 +353,7 @@ export function MonthPage() {
                   >
                     <div className="score-ring-inner">
                       <strong>{compat.alignment ?? '—'}</strong>
-                      <span>同频指数</span>
+                      <span>同感指数</span>
                     </div>
                   </div>
                   <div className="compat-copy">
@@ -361,18 +361,18 @@ export function MonthPage() {
                     <p>{compat.hint}</p>
                     {compat.trend && (
                       <span className={`trend trend-${compat.trend}`}>
-                        {compat.trend === 'up' ? '↑ 比之前更同频' : compat.trend === 'down' ? '↓ 最近温差在变大' : '→ 和之前差不多'}
+                        {compat.trend === 'up' ? '↑ 比之前更同感' : compat.trend === 'down' ? '↓ 最近温差在变大' : '→ 和之前差不多'}
                       </span>
                     )}
                   </div>
                 </div>
                 <div className="compat-foot">
-                  <span>同频指数 = 100 − 当天两人感受的平均差值</span>
+                  <span>同感指数 = 100 − 当天两人感受的平均差值</span>
                 </div>
               </>
             ) : (
               <div className="compat-empty">
-                <p>拿到对方的授权凭证后，这里会显示你们的同频指数。</p>
+                <p>拿到对方的授权凭证后，这里会显示你们的同感指数。</p>
                 <Link to="/access" className="primary-btn inline">
                   去授权管理
                 </Link>

@@ -150,24 +150,67 @@ export function GachaMachine({
       return found
     }
 
-    const handleDown = (event: PointerEvent) => {
-      const ball = findBall(event.clientX, event.clientY)
-      if (!ball) {
-        selectRef.current(null)
-        return
-      }
-      Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.15)
-      Matter.Sleeping.set(ball, false)
-      Matter.Body.setVelocity(ball, { x: ball.velocity.x, y: -2.2 })
-      selectRef.current(ball.meta.id === selectedRef.current ? null : ball.meta.id)
+    const inGlass = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect()
+      const x = ((clientX - rect.left) / rect.width) * W
+      const y = ((clientY - rect.top) / rect.height) * H
+      return y < CY + R - 10 && Math.hypot(x - CX, y - CY) <= R
     }
 
-    const handleMove = (event: PointerEvent) => {
-      canvas.style.cursor = findBall(event.clientX, event.clientY) ? 'pointer' : 'default'
+    let press: { startX: number; startY: number; ball: MetaBody | null; moved: boolean } | null = null
+
+    const clearPress = () => {
+      press = null
+      window.removeEventListener('pointermove', handleTapMove)
+      window.removeEventListener('pointerup', handleTapUp)
+      window.removeEventListener('pointercancel', handleTapCancel)
+    }
+
+    const handleTapMove = (event: PointerEvent) => {
+      if (!press) return
+      if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > 8) {
+        press.moved = true
+      }
+    }
+
+    const handleTapUp = (event: PointerEvent) => {
+      const state = press
+      clearPress()
+      if (!state || state.moved) return
+      if (state.ball) {
+        Matter.Sleeping.set(state.ball, false)
+        Matter.Body.setAngularVelocity(state.ball, (Math.random() - 0.5) * 0.15)
+        Matter.Body.setVelocity(state.ball, { x: state.ball.velocity.x, y: -2.2 })
+        selectRef.current(state.ball.meta.id === selectedRef.current ? null : state.ball.meta.id)
+        return
+      }
+      // 底座不算空白区域，避免滑动页面时误触取消选中
+      if (inGlass(event.clientX, event.clientY)) selectRef.current(null)
+    }
+
+    const handleTapCancel = () => {
+      clearPress()
+    }
+
+    const handleDown = (event: PointerEvent) => {
+      if (press) return
+      press = {
+        startX: event.clientX,
+        startY: event.clientY,
+        ball: findBall(event.clientX, event.clientY),
+        moved: false
+      }
+      window.addEventListener('pointermove', handleTapMove)
+      window.addEventListener('pointerup', handleTapUp)
+      window.addEventListener('pointercancel', handleTapCancel)
+    }
+
+    const handleCursor = (event: PointerEvent) => {
+      canvas.style.cursor = findBall(event.clientX, event.clientY) ? 'grab' : 'default'
     }
 
     canvas.addEventListener('pointerdown', handleDown)
-    canvas.addEventListener('pointermove', handleMove)
+    canvas.addEventListener('pointermove', handleCursor)
 
     let raf = 0
     const draw = () => {
@@ -290,8 +333,9 @@ export function GachaMachine({
 
     return () => {
       cancelAnimationFrame(raf)
+      clearPress()
       canvas.removeEventListener('pointerdown', handleDown)
-      canvas.removeEventListener('pointermove', handleMove)
+      canvas.removeEventListener('pointermove', handleCursor)
       Matter.Composite.clear(engine.world, false)
       Matter.Engine.clear(engine)
       engineRef.current = null

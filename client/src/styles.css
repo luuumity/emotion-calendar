@@ -1028,6 +1028,8 @@ p {
   height: auto;
   /* 允许从扭蛋机上滑动页面，同时保留点按选中扭蛋的能力 */
   touch-action: pan-y;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .drop-hint {
@@ -1216,6 +1218,16 @@ p {
   letter-spacing: 0.08em;
 }
 
+.capsule-preview.draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.capsule-preview.draggable:active {
+  cursor: grabbing;
+}
+
 .score-meta {
   display: flex;
   flex-direction: column;
@@ -1300,7 +1312,20 @@ p {
 .record-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
   margin-top: 14px;
+}
+
+.drag-delete-hint {
+  margin-right: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+
+.record-card {
+  scroll-margin-top: 84px;
 }
 
 .record-empty {
@@ -1389,6 +1414,44 @@ p {
 
 .drag-ghost.over {
   transform: translate(-50%, -50%) scale(1.14);
+}
+
+.delete-zone {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  z-index: 260;
+  min-width: 190px;
+  padding: 14px 22px;
+  border-radius: 24px;
+  border: 2px dashed rgba(196, 71, 58, 0.6);
+  background: rgba(255, 249, 241, 0.97);
+  color: #a63d32;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 16px 36px rgba(47, 42, 37, 0.18);
+  animation: pop 0.16s ease;
+}
+
+.delete-zone span {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.delete-zone small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.delete-zone.over {
+  background: #c4473a;
+  border-color: #c4473a;
+  color: #fff9f0;
+  transform: translateX(-50%) scale(1.05);
 }
 
 /* ---------- access ---------- */

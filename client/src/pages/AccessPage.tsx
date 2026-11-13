@@ -132,7 +132,7 @@ export function AccessPage() {
                 onClick={() => setScope('colors')}
               >
                 <strong>仅颜色</strong>
-                <span>能看到每天的分数、颜色和同频指数，看不到理由。</span>
+                <span>能看到每天的分数、颜色和同感指数，看不到理由。</span>
               </button>
               <button
                 type="button"
