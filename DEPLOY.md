@@ -232,28 +232,49 @@ curl -s http://127.0.0.1:3100/api/health
 
 ## 11. 备份与恢复
 
-```bash
-apt-get install -y sqlite3
+依赖：`apt-get install -y sqlite3`（gzip/tar 系统自带）。
 
-# 在线备份，不需要停服务
-sqlite3 /opt/emotion-calendar/data/emotion.db \
-  ".backup '/opt/emotion-calendar/backups/emotion-$(date +%F-%H%M).db'"
-
-# 只保留 14 天
-find /opt/emotion-calendar/backups -name 'emotion-*.db' -mtime +14 -delete
-```
-
-可以加到 root 的 crontab（每天 03:10）：
-
-```
-10 3 * * * sqlite3 /opt/emotion-calendar/data/emotion.db ".backup '/opt/emotion-calendar/backups/emotion-$(date +\%F-\%H\%M).db'" && find /opt/emotion-calendar/backups -name 'emotion-*.db' -mtime +14 -delete
-```
-
-恢复：
+本地备份脚本为 `/usr/local/bin/emotion-backup.sh`（仅存在于服务器，不入仓库），内容如下：
 
 ```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT=/opt/emotion-calendar
+DATA="$ROOT/data"
+DEST="$ROOT/backups"
+STAMP=$(date +%F-%H%M)
+mkdir -p "$DEST"
+
+# 在线备份，不锁库，WAL 里的内容也会包含进来
+sqlite3 "$DATA/emotion.db" ".backup '$DEST/emotion-$STAMP.db'"
+gzip -f "$DEST/emotion-$STAMP.db"
+
+# 配置与会话密钥一起打包，恢复时不用重新发证书或强制所有人重新登录
+tar -czf "$DEST/config-$STAMP.tar.gz" -C "$ROOT" .env.production data/jwt-secret.txt
+chmod 600 "$DEST/emotion-$STAMP.db.gz" "$DEST/config-$STAMP.tar.gz"
+
+find "$DEST" -name "emotion-*.db.gz" -mtime +14 -delete
+find "$DEST" -name "config-*.tar.gz" -mtime +14 -delete
+
+echo "$(date "+%F %T") backup done: emotion-$STAMP.db.gz"
+```
+
+root 的 crontab（每天 03:10，已配置）：
+
+```
+10 3 * * * /usr/local/bin/emotion-backup.sh >> /var/log/emotion-backup.log 2>&1
+```
+
+从本地备份恢复（把文件名换成要恢复的备份）：
+
+```bash
+cd /opt/emotion-calendar/backups
+gunzip -k emotion-2026-11-13-1216.db.gz   # -k 保留原压缩包
 systemctl stop emotion-calendar
-cp /opt/emotion-calendar/backups/emotion-2026-11-13-0310.db /opt/emotion-calendar/data/emotion.db
+cp emotion-2026-11-13-1216.db /opt/emotion-calendar/data/emotion.db
+# 可选：同时恢复配置与会话密钥（避免所有人重新登录）
+tar -xzf config-2026-11-13-1216.tar.gz -C /opt/emotion-calendar
 systemctl start emotion-calendar
 ```
 
