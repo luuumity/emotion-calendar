@@ -15,16 +15,17 @@
 
 已完成：OSS 已开通、emotion 的 Bucket 已创建（香港）、阻止公共访问已开启、版本控制已开启。
 
-- [ ] 建 RAM 子用户 `emotion-backup`，保存 AK（详见 [SETUP §4.1](./OSS-SETUP.md#41-创建用户)）
-- [ ] 建最小权限策略 `emotion-backup-oss`（详见 [SETUP §4.2](./OSS-SETUP.md#42-创建自定义权限策略)）
-- [ ] 给 `emotion-backup` 用户授权（详见 [SETUP §4.3](./OSS-SETUP.md#43-授权)）
-- [ ] 配生命周期：`backups/` 前缀，当前版本 30 天删除（详见 [SETUP §5](./OSS-SETUP.md#5-生命周期规则云端保留-30-天)）
-- [ ] 配余额预警（¥10、¥5）+ 月度预算（¥5）（详见 [SETUP §6.1-6.2](./OSS-SETUP.md#61-余额预警)）
+- [x] 建 RAM 子用户 `emotion-backup`，保存 AK（详见 [SETUP §4.1](./OSS-SETUP.md#41-创建用户)）
+- [x] 建最小权限策略 `emotion-backup-oss`（详见 [SETUP §4.2](./OSS-SETUP.md#42-创建自定义权限策略)）
+- [x] 给 `emotion-backup` 用户授权（详见 [SETUP §4.3](./OSS-SETUP.md#43-授权)）
+- [x] 配生命周期：`backups/` 前缀，当前版本不过期（永久归档，标准存储）、历史版本 14 天删、碎片 14 天删（详见 [SETUP §5](./OSS-SETUP.md#5-生命周期规则云端永久归档)）
+- [x] 配月度预算（¥5，50%/80%/100% 通知）（详见 [SETUP §6.2](./OSS-SETUP.md#62-月度预算)）
+- [x] 配可用额度预警（阈值 ¥10，资金账户页账户设置区域）（详见 [SETUP §6.1](./OSS-SETUP.md#61-余额预警可用额度预警)）
 - [ ] 配云监控异常告警（请求数、公网流出流量）（详见 [SETUP §6.3](./OSS-SETUP.md#63-云监控异常告警)）
-- [ ] 阿里云主账号开启 MFA（详见 [SETUP §7](./OSS-SETUP.md#7-安全加固)）
-- [ ] 把 5 项信息发给部署方（详见 [SETUP §8](./OSS-SETUP.md#8-交接给部署方的信息)）
+- [x] 阿里云主账号开启 MFA（详见 [SETUP §7](./OSS-SETUP.md#7-安全加固)）
+- [x] 把 5 项信息发给部署方（详见 [SETUP §8](./OSS-SETUP.md#8-交接给部署方的信息)）
 
-部署方收到后会完成：服务器写入 `/etc/emotion-backup/oss.env`（600 权限）、安装 rclone、每日加密上传、30 天云端保留，并做一次恢复演练。
+部署方收到后会完成：服务器写入 `/etc/emotion-backup/oss.env`（600 权限）、安装 rclone、每日加密上传、云端永久归档，并做一次恢复演练。
 
 ---
 
@@ -36,7 +37,7 @@
 2. **新建 RAM 子用户**：`<项目名>-backup`，仅 OpenAPI 访问，生成 AK（参照 [SETUP §4.1](./OSS-SETUP.md#41-创建用户)）
 3. **新建权限策略**：`<项目名>-backup-oss`，JSON 模板同 [SETUP §4.2](./OSS-SETUP.md#42-创建自定义权限策略)，Resource 换成新 Bucket 名；`acs:SourceIp` 保持 `43.103.44.162`（若新项目在别的服务器，改对应 IP）
 4. **授权**：新策略挂到新 RAM 用户（参照 [SETUP §4.3](./OSS-SETUP.md#43-授权)）
-5. **配生命周期**：新 Bucket 建一条 `backups/` 前缀、30 天删除的规则（参照 [SETUP §5](./OSS-SETUP.md#5-生命周期规则云端保留-30-天)）
+5. **配生命周期**：新 Bucket 建一条 `backups/` 前缀、30 天删除的规则（参照 [SETUP §5](./OSS-SETUP.md#5-生命周期规则云端永久归档)）
 6. **发给部署方**：新 Bucket 的 5 项信息（名称、Region、Endpoint、AK ID、AK Secret）
 7. **部署方做的事**：在服务器上为新项目加一套 rclone remote + cron + 恢复演练记录
 
