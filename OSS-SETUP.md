@@ -1,5 +1,7 @@
 # OSS 备份配置手册 · emotion.cinnamon.xin
 
+> **整体策略**：每个项目一个 Bucket，一个 Bucket 一个 RAM 子用户 + AK（最小权限 + 服务器 IP 白名单）。本文档是 **emotion 项目**的实例；以后加 homecare、blog 等项目时，按 [OSS-TODO.md](OSS-TODO.md) 末尾「以后加新项目」的步骤复制同样的流程即可，**不要与 emotion 共用 Bucket 或 AK**。
+
 面向阿里云账号持有人，在控制台完成 OSS 开通、Bucket 创建、权限与告警配置。
 配好后把第 8 节的信息交给部署方，由部署方在服务器上接入加密上传与恢复演练。
 

@@ -1,91 +1,43 @@
-# OSS 备份 · 剩余待办清单
+# OSS 备份 · 进度跟踪
 
-已完成：OSS 已开通、Bucket 已创建（香港）、阻止公共访问已开启、版本控制已开启。
+> 本文档只跟踪「做了没」。具体怎么做（定价、JSON、FAQ）见 [OSS-SETUP.md](./OSS-SETUP.md)。
 
-下面按顺序做，全部在阿里云控制台完成。
+## 设计原则
+
+- **多 Bucket**：每个项目一个 Bucket，数据天然隔离。
+- **一个 Bucket 一个 AK**：每个 Bucket 配独立的 RAM 子用户 + AccessKey，最小权限 + 服务器 IP 白名单。一个项目的 AK 泄露不影响其他项目。
+- **当前只做 emotion 项目**。其他项目以后按下面「以后加新项目」的模式复制即可。
+- 多 Bucket **不会增加费用**：OSS 按存储量/请求/流量计费，不按 Bucket 数量收费。
 
 ---
 
-## 1. 建 RAM 子用户并保存 AK
+## 当前任务：emotion 项目
 
-- [ ] RAM 控制台 → 用户 → 创建用户
-- [ ] 登录名称：`emotion-backup`
-- [ ] 访问方式：勾选 **OpenAPI 调用访问**（不勾控制台登录）
-- [ ] 创建后立即保存 **AccessKey ID** 和 **AccessKey Secret**（Secret 只显示一次）
+已完成：OSS 已开通、emotion 的 Bucket 已创建（香港）、阻止公共访问已开启、版本控制已开启。
 
-## 2. 建最小权限策略
-
-- [ ] RAM → 权限策略 → 创建策略 → 脚本编辑，粘贴下面 JSON
-- [ ] 把 `你的bucket名` 替换成实际 Bucket 名（共两处）
-- [ ] 策略名称：`emotion-backup-oss`
-
-```json
-{
-  "Version": "1",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "oss:PutObject",
-        "oss:GetObject",
-        "oss:DeleteObject",
-        "oss:ListObjects",
-        "oss:ListObjectsV2",
-        "oss:AbortMultipartUpload",
-        "oss:ListParts"
-      ],
-      "Resource": [
-        "acs:oss:*:*:你的bucket名",
-        "acs:oss:*:*:你的bucket名/*"
-      ],
-      "Condition": {
-        "IpAddress": {
-          "acs:SourceIp": ["43.103.44.162"]
-        }
-      }
-    }
-  ]
-}
-```
-
-## 3. 给子用户授权
-
-- [ ] RAM 用户 `emotion-backup` → 添加权限 → 选择 `emotion-backup-oss`
-
-## 4. 配生命周期（云端保留 30 天）
-
-- [ ] Bucket → 数据管理 → 生命周期 → 创建规则
-- [ ] 前缀：`backups/`
-- [ ] 当前版本：30 天后删除
-- [ ] 非当前版本：7 天后删除
-- [ ] 碎片：7 天后删除
-
-## 5. 配余额与预算告警
-
-- [ ] 费用中心 → 资金管理 → 可用额度预警：`¥10`、`¥5`，短信 + 邮件
-- [ ] 费用与成本 → 预算管理 → 月度预算 `¥5`，50% / 80% / 100% 通知
-
-## 6. 配云监控异常告警
-
-- [ ] 云监控 → 报警规则 → 创建规则 → 产品选 OSS
-- [ ] 监控对象：备份 Bucket
-- [ ] 指标：请求数、公网流出流量（异常升高时告警）
-- [ ] 通知：短信 + 邮件
-
-## 7. 账号安全
-
-- [ ] 阿里云主账号开启 MFA
-
-## 8. 把信息发给部署方
-
-- [ ] Bucket 名称：`____________`
-- [ ] Region：`cn-hongkong`
-- [ ] Endpoint：`oss-cn-hongkong.aliyuncs.com`
-- [ ] AccessKey ID：`____________`
-- [ ] AccessKey Secret：`____________`
-
-> 这个 AK 只能读写这一个 Bucket，且只能从服务器 IP `43.103.44.162` 使用。交接后随时可以在 RAM 里禁用或删除重建。
+- [ ] 建 RAM 子用户 `emotion-backup`，保存 AK（详见 [SETUP §4.1](./OSS-SETUP.md#41-创建用户)）
+- [ ] 建最小权限策略 `emotion-backup-oss`（详见 [SETUP §4.2](./OSS-SETUP.md#42-创建自定义权限策略)）
+- [ ] 给 `emotion-backup` 用户授权（详见 [SETUP §4.3](./OSS-SETUP.md#43-授权)）
+- [ ] 配生命周期：`backups/` 前缀，当前版本 30 天删除（详见 [SETUP §5](./OSS-SETUP.md#5-生命周期规则云端保留-30-天)）
+- [ ] 配余额预警（¥10、¥5）+ 月度预算（¥5）（详见 [SETUP §6.1-6.2](./OSS-SETUP.md#61-余额预警)）
+- [ ] 配云监控异常告警（请求数、公网流出流量）（详见 [SETUP §6.3](./OSS-SETUP.md#63-云监控异常告警)）
+- [ ] 阿里云主账号开启 MFA（详见 [SETUP §7](./OSS-SETUP.md#7-安全加固)）
+- [ ] 把 5 项信息发给部署方（详见 [SETUP §8](./OSS-SETUP.md#8-交接给部署方的信息)）
 
 部署方收到后会完成：服务器写入 `/etc/emotion-backup/oss.env`（600 权限）、安装 rclone、每日加密上传、30 天云端保留，并做一次恢复演练。
 
-完整说明见 [OSS-SETUP.md](OSS-SETUP.md)。
+---
+
+## 以后加新项目（复制这个模式）
+
+每加一个项目（如 homecare、blog），重复以下步骤。**每个项目都独立一套，不与 emotion 共用 Bucket 或 AK。** 详细操作参照 [OSS-SETUP.md](./OSS-SETUP.md) 对应章节，把项目名替换即可。
+
+1. **新建 Bucket**：中国香港、私有、阻止公共访问、版本控制开启（参照 [SETUP §3](./OSS-SETUP.md#3-创建-bucket)）
+2. **新建 RAM 子用户**：`<项目名>-backup`，仅 OpenAPI 访问，生成 AK（参照 [SETUP §4.1](./OSS-SETUP.md#41-创建用户)）
+3. **新建权限策略**：`<项目名>-backup-oss`，JSON 模板同 [SETUP §4.2](./OSS-SETUP.md#42-创建自定义权限策略)，Resource 换成新 Bucket 名；`acs:SourceIp` 保持 `43.103.44.162`（若新项目在别的服务器，改对应 IP）
+4. **授权**：新策略挂到新 RAM 用户（参照 [SETUP §4.3](./OSS-SETUP.md#43-授权)）
+5. **配生命周期**：新 Bucket 建一条 `backups/` 前缀、30 天删除的规则（参照 [SETUP §5](./OSS-SETUP.md#5-生命周期规则云端保留-30-天)）
+6. **发给部署方**：新 Bucket 的 5 项信息（名称、Region、Endpoint、AK ID、AK Secret）
+7. **部署方做的事**：在服务器上为新项目加一套 rclone remote + cron + 恢复演练记录
+
+> 注意：余额预警、月度预算、主账号 MFA 是**账号级**的，配一次就行，不需要每个项目重复。云监控告警建议每个 Bucket 各配一条。
