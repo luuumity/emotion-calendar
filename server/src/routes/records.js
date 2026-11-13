@@ -71,24 +71,15 @@ router.put('/:id', (req, res) => {
   const existing = selectOne.get(id, req.user.id)
   if (!existing) return res.status(404).json({ error: '没有找到这颗扭蛋' })
 
-  const hasScore = req.body?.score !== undefined
-  const hasNote = req.body?.note !== undefined
-  if (!hasScore && !hasNote) return res.status(400).json({ error: '没有需要更新的内容' })
-
-  let score = existing.score
-  if (hasScore) {
-    score = toScore(req.body.score)
-    if (score === null) return res.status(400).json({ error: '感受值需为 0-100 的整数' })
+  if (req.body?.score !== undefined) {
+    return res.status(400).json({ error: '颜色和分值创建后不可修改，请删除这颗后重新投' })
   }
+  if (req.body?.note === undefined) return res.status(400).json({ error: '没有需要更新的内容' })
 
-  let note = existing.note
-  if (hasNote) {
-    note = toNote(req.body.note)
-    if (note === null) return res.status(400).json({ error: '理由需为文本' })
-  }
+  const note = toNote(req.body.note)
+  if (note === null) return res.status(400).json({ error: '理由需为文本' })
 
-  db.prepare('UPDATE records SET score = ?, note = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(
-    score,
+  db.prepare('UPDATE records SET note = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(
     note,
     new Date().toISOString(),
     id,

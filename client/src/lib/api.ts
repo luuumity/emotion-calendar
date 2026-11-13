@@ -84,7 +84,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(note === undefined ? { day, score } : { day, score, note })
     }),
-  updateRecord: (id: number, patch: { score?: number; note?: string }, opts?: { keepalive?: boolean }) =>
+  updateRecord: (id: number, patch: { note: string }, opts?: { keepalive?: boolean }) =>
     request<{ record: RecordItem }>(`/records/${id}`, {
       method: 'PUT',
       body: JSON.stringify(patch),

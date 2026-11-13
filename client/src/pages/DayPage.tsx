@@ -168,31 +168,13 @@ export function DayPage() {
     setRecords((prev) => sortById(prev.map((r) => (r.id === record.id ? record : r))))
   }
 
-  async function applyScore(score: number) {
+  async function createBall(score: number) {
     if (!canEdit) return
-    setSaveState('saving')
-
-    if (selected) {
-      try {
-        const res = await api.updateRecord(selected.id, { score })
-        replaceRecord(res.record)
-        setSaveState('saved')
-        setToast(`第 ${balls.find((b) => b.id === selected.id)?.index ?? ''} 颗改成 ${score} 分 · ${scoreLabel(score)}`)
-      } catch (err) {
-        setSaveState('error')
-        setToast(errorMessage(err))
-      }
-      return
-    }
-
     try {
       const res = await api.createRecord(date, score)
       setRecords((prev) => sortById([...prev, res.record]))
-      setSelectedId(res.record.id)
-      setSaveState('saved')
       setToast(`已投进一颗 ${score} 分 · ${scoreLabel(score)}`)
     } catch (err) {
-      setSaveState('error')
       setToast(errorMessage(err))
     }
   }
@@ -272,9 +254,18 @@ export function DayPage() {
     const state = dragRef.current
     if (!state) return
     const over = isOverMachine(event.clientX, event.clientY)
-    const shouldApply = over || !state.moved
+    const tapped = !state.moved
     endDrag()
-    if (shouldApply) void applyScore(state.score)
+    if (over) {
+      // 拖进扭蛋机永远算新投一颗，不会改到当前选中的扭蛋
+      void createBall(state.score)
+    } else if (tapped) {
+      if (selected) {
+        setToast('已选中一颗，想投新的请拖动色块，或先点空白取消选中')
+        return
+      }
+      void createBall(state.score)
+    }
   }
 
   function startDrag(score: number, event: ReactPointerEvent) {
@@ -364,15 +355,15 @@ export function DayPage() {
 
           <div ref={machineRef} className={drag?.over ? 'machine-wrap drop-active' : 'machine-wrap'}>
             <GachaMachine stageKey={stageKey} balls={balls} selectedId={selectedId} onSelect={handleSelect} />
-            {drag?.over && <div className="drop-hint">{selected ? '松手，改成这个分数' : '松手，投进扭蛋机'}</div>}
+            {drag?.over && <div className="drop-hint">松手，投进新的扭蛋</div>}
           </div>
 
           {canEdit ? (
             <SwatchRail
               selectedScore={selected?.score ?? null}
               onDragStart={startDrag}
-              title={selected ? `拖动色块修改第 ${selectedIndex} 颗` : '拖动色块投进扭蛋机'}
-              hint={selected ? '点空白处取消选中，再投新的' : '或直接点一下'}
+              title={selected ? '拖动色块再投一颗新的' : '拖动色块投进扭蛋机'}
+              hint={selected ? '颜色和分值创建后不可修改' : '或直接点一下'}
             />
           ) : (
             <div className="readonly-strip">
@@ -506,8 +497,8 @@ export function DayPage() {
             <ol>
               <li>从红色到绿色，挑一个最接近此刻感受的颜色。</li>
               <li>拖进扭蛋机，同一天可以投很多颗，月视图取平均。</li>
-              <li>点开任意一颗，补上当时的理由；再拖色块就能改这一颗。</li>
-              <li>点一下空白处取消选中，就能继续投新的。</li>
+              <li>点开任意一颗，补上当时的理由；颜色和分值创建后不能改，想换就删掉重投。</li>
+              <li>拖动色块随时能投新的一颗；没选中扭蛋时，点一下色块也可以。</li>
             </ol>
           </section>
         </aside>
