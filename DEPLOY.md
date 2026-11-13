@@ -62,35 +62,17 @@ npm config set registry https://registry.npmmirror.com
 
 ## 3. 拉取代码
 
-仓库是私有的，推荐在服务器上生成一把**只读部署密钥**，再把公钥加到 GitHub 仓库。
-
-```bash
-ssh-keygen -t ed25519 -N '' -C 'emotion-calendar-server' -f /root/.ssh/emotion_calendar_deploy
-cat /root/.ssh/emotion_calendar_deploy.pub
-```
-
-打开 https://github.com/luuumity/emotion-calendar → `Settings` → `Deploy keys` → `Add deploy key`，粘贴上面的公钥，**不要勾选** Allow write access（只读就够了）。
-
-然后克隆：
+仓库是公开的，直接 HTTPS 克隆，不需要配置部署密钥：
 
 ```bash
 mkdir -p /opt
 cd /opt
-GIT_SSH_COMMAND='ssh -i /root/.ssh/emotion_calendar_deploy -o StrictHostKeyChecking=accept-new' \
-  git clone git@github.com:luuumity/emotion-calendar.git
+git clone https://github.com/luuumity/emotion-calendar.git
 ```
 
-如果服务器到 GitHub 的 22 端口不通，在 `/root/.ssh/config` 里加：
+如果服务器访问 GitHub 较慢或超时，可以在本地下载 ZIP 后上传到服务器解压，目录名保持 `/opt/emotion-calendar` 即可。
 
-```
-Host github.com
-  HostName ssh.github.com
-  Port 443
-  User git
-  IdentityFile /root/.ssh/emotion_calendar_deploy
-```
-
-再重新执行 `git clone`。
+> 若以后仓库改回私有，再按旧流程处理：在服务器生成 SSH key，把公钥加到仓库的 Deploy keys，然后用 `git@github.com:luuumity/emotion-calendar.git` 克隆。
 
 ## 4. 安装依赖并构建
 
