@@ -85,12 +85,24 @@ export function GachaMachine({
   stageKey,
   balls,
   selectedId,
-  onSelect
+  onSelect,
+  canDelete,
+  draggingId,
+  onBallDragStart,
+  onBallDragMove,
+  onBallDragEnd,
+  onBallDragCancel
 }: {
   stageKey: string
   balls: GachaBall[]
   selectedId: number | null
   onSelect: (id: number | null) => void
+  canDelete: boolean
+  draggingId: number | null
+  onBallDragStart: (ball: GachaBall, clientX: number, clientY: number) => void
+  onBallDragMove: (clientX: number, clientY: number) => void
+  onBallDragEnd: (clientX: number, clientY: number) => void
+  onBallDragCancel: () => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const engineRef = useRef<Matter.Engine | null>(null)
@@ -98,10 +110,16 @@ export function GachaMachine({
   const selectedRef = useRef(selectedId)
   const selectRef = useRef(onSelect)
   const countRef = useRef(0)
+  const canDeleteRef = useRef(canDelete)
+  const draggingIdRef = useRef(draggingId)
+  const dragCallbacksRef = useRef({ onBallDragStart, onBallDragMove, onBallDragEnd, onBallDragCancel })
 
   selectedRef.current = selectedId
   selectRef.current = onSelect
   countRef.current = balls.length
+  canDeleteRef.current = canDelete
+  draggingIdRef.current = draggingId
+  dragCallbacksRef.current = { onBallDragStart, onBallDragMove, onBallDragEnd, onBallDragCancel }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -157,9 +175,27 @@ export function GachaMachine({
       return y < CY + R - 10 && Math.hypot(x - CX, y - CY) <= R
     }
 
-    let press: { startX: number; startY: number; ball: MetaBody | null; moved: boolean } | null = null
+    type Press = {
+      startX: number
+      startY: number
+      ball: MetaBody | null
+      moved: boolean
+      pointerType: string
+      timer: number
+    }
+
+    let press: Press | null = null
+    let deleteDrag: MetaBody | null = null
+
+    const activateDelete = (ball: MetaBody, clientX: number, clientY: number) => {
+      if (deleteDrag) return
+      deleteDrag = ball
+      if (press) press.moved = true
+      dragCallbacksRef.current.onBallDragStart(ball.meta, clientX, clientY)
+    }
 
     const clearPress = () => {
+      if (press?.timer) window.clearTimeout(press.timer)
       press = null
       window.removeEventListener('pointermove', handleTapMove)
       window.removeEventListener('pointerup', handleTapUp)
@@ -170,13 +206,29 @@ export function GachaMachine({
       if (!press) return
       if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > 8) {
         press.moved = true
+        if (press.timer) {
+          window.clearTimeout(press.timer)
+          press.timer = 0
+        }
+        // 鼠标/触控笔移动超过阈值即可开始拖动；触屏必须长按启动，避免和滚动冲突
+        if (!deleteDrag && press.ball && canDeleteRef.current && press.pointerType !== 'touch') {
+          activateDelete(press.ball, event.clientX, event.clientY)
+        }
       }
+      if (deleteDrag) dragCallbacksRef.current.onBallDragMove(event.clientX, event.clientY)
     }
 
     const handleTapUp = (event: PointerEvent) => {
       const state = press
+      if (!state) return
+      const wasDeleting = deleteDrag !== null
       clearPress()
-      if (!state || state.moved) return
+      if (wasDeleting) {
+        deleteDrag = null
+        dragCallbacksRef.current.onBallDragEnd(event.clientX, event.clientY)
+        return
+      }
+      if (state.moved) return
       if (state.ball) {
         Matter.Sleeping.set(state.ball, false)
         Matter.Body.setAngularVelocity(state.ball, (Math.random() - 0.5) * 0.15)
@@ -189,28 +241,50 @@ export function GachaMachine({
     }
 
     const handleTapCancel = () => {
+      const wasDeleting = deleteDrag !== null
+      deleteDrag = null
       clearPress()
+      if (wasDeleting) dragCallbacksRef.current.onBallDragCancel()
     }
 
     const handleDown = (event: PointerEvent) => {
       if (press) return
+      const ball = findBall(event.clientX, event.clientY)
       press = {
         startX: event.clientX,
         startY: event.clientY,
-        ball: findBall(event.clientX, event.clientY),
-        moved: false
+        ball,
+        moved: false,
+        pointerType: event.pointerType,
+        timer: 0
+      }
+      if (ball && canDeleteRef.current && event.pointerType === 'touch') {
+        press.timer = window.setTimeout(() => {
+          if (!press || press.moved || !press.ball) return
+          press.timer = 0
+          activateDelete(press.ball, press.startX, press.startY)
+        }, 260)
       }
       window.addEventListener('pointermove', handleTapMove)
       window.addEventListener('pointerup', handleTapUp)
       window.addEventListener('pointercancel', handleTapCancel)
     }
 
+    const handleTouchMove = (event: TouchEvent) => {
+      if (deleteDrag) event.preventDefault()
+    }
+
     const handleCursor = (event: PointerEvent) => {
+      if (deleteDrag) {
+        canvas.style.cursor = 'grabbing'
+        return
+      }
       canvas.style.cursor = findBall(event.clientX, event.clientY) ? 'grab' : 'default'
     }
 
     canvas.addEventListener('pointerdown', handleDown)
     canvas.addEventListener('pointermove', handleCursor)
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false })
 
     let raf = 0
     const draw = () => {
@@ -285,6 +359,7 @@ export function GachaMachine({
       ctx.fillRect(0, 0, W, H)
 
       for (const body of ballMapRef.current.values()) {
+        if (body.meta.id === draggingIdRef.current) continue
         drawBall(ctx, body, body.meta.id === selectedRef.current)
       }
 
@@ -333,9 +408,11 @@ export function GachaMachine({
 
     return () => {
       cancelAnimationFrame(raf)
+      if (deleteDrag) dragCallbacksRef.current.onBallDragCancel()
       clearPress()
       canvas.removeEventListener('pointerdown', handleDown)
       canvas.removeEventListener('pointermove', handleCursor)
+      canvas.removeEventListener('touchmove', handleTouchMove)
       Matter.Composite.clear(engine.world, false)
       Matter.Engine.clear(engine)
       engineRef.current = null

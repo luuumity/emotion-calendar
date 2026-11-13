@@ -1218,16 +1218,6 @@ p {
   letter-spacing: 0.08em;
 }
 
-.capsule-preview.draggable {
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-
-.capsule-preview.draggable:active {
-  cursor: grabbing;
-}
-
 .score-meta {
   display: flex;
   flex-direction: column;
@@ -1315,13 +1305,6 @@ p {
   align-items: center;
   gap: 10px;
   margin-top: 14px;
-}
-
-.drag-delete-hint {
-  margin-right: auto;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--ink-faint);
 }
 
 .record-card {
