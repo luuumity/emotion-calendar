@@ -173,7 +173,8 @@ export function DayPage() {
     try {
       const res = await api.createRecord(date, score)
       setRecords((prev) => sortById([...prev, res.record]))
-      setToast(`已投进一颗 ${score} 分 · ${scoreLabel(score)}`)
+      handleSelect(res.record.id)
+      setToast(`已投进一颗 ${score} 分 · ${scoreLabel(score)}，可以写理由了`)
     } catch (err) {
       setToast(errorMessage(err))
     }
@@ -256,14 +257,8 @@ export function DayPage() {
     const over = isOverMachine(event.clientX, event.clientY)
     const tapped = !state.moved
     endDrag()
-    if (over) {
-      // 拖进扭蛋机永远算新投一颗，不会改到当前选中的扭蛋
-      void createBall(state.score)
-    } else if (tapped) {
-      if (selected) {
-        setToast('已选中一颗，想投新的请拖动色块，或先点空白取消选中')
-        return
-      }
+    if (over || tapped) {
+      // 点击和拖进扭蛋机都只负责新建，不会改到已选中的扭蛋
       void createBall(state.score)
     }
   }
@@ -360,10 +355,9 @@ export function DayPage() {
 
           {canEdit ? (
             <SwatchRail
-              selectedScore={selected?.score ?? null}
               onDragStart={startDrag}
-              title={selected ? '拖动色块再投一颗新的' : '拖动色块投进扭蛋机'}
-              hint={selected ? '颜色和分值创建后不可修改' : '或直接点一下'}
+              title="点一下，或拖进扭蛋机"
+              hint="颜色和分值创建后不可修改"
             />
           ) : (
             <div className="readonly-strip">
@@ -477,10 +471,10 @@ export function DayPage() {
               <div className="record-empty">
                 <p>
                   {editable
-                    ? '这一天还没有扭蛋。挑一个颜色，拖进扭蛋机里。'
+                    ? '这一天还没有扭蛋。挑一个颜色，点一下或拖进扭蛋机。'
                     : `${machineOwner} 这一天还没有记录。`}
                 </p>
-                {editable && <span className="empty-arrow">↗ 试试拖动色块</span>}
+                {editable && <span className="empty-arrow">↗ 点一下色块，或拖进去</span>}
               </div>
             )}
           </section>
@@ -496,9 +490,9 @@ export function DayPage() {
             <h3>怎么玩</h3>
             <ol>
               <li>从红色到绿色，挑一个最接近此刻感受的颜色。</li>
-              <li>拖进扭蛋机，同一天可以投很多颗，月视图取平均。</li>
-              <li>点开任意一颗，补上当时的理由；颜色和分值创建后不能改，想换就删掉重投。</li>
-              <li>拖动色块随时能投新的一颗；没选中扭蛋时，点一下色块也可以。</li>
+              <li>点一下或拖进扭蛋机，同一天可以投很多颗，月视图取平均。</li>
+              <li>新建后会自动打开理由框，补上当时的理由；点开任意一颗也能改理由。</li>
+              <li>颜色和分值创建后不能改，想换就删掉重投；选中只用于写理由或删除。</li>
             </ol>
           </section>
         </aside>
