@@ -40,7 +40,7 @@ export function LoginPage() {
             <br />
             投进扭蛋机。
           </h1>
-          <p>诚实地记下每一天的颜色，再一起读懂两人的心情。</p>
+          <p>诚实地记下每一天的颜色，一起读懂两人的心情。</p>
         </div>
 
         <div className="auth-machine" aria-hidden="true">
