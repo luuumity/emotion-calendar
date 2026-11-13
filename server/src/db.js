@@ -26,8 +26,8 @@ CREATE TABLE IF NOT EXISTS records (
   day TEXT NOT NULL,
   score INTEGER NOT NULL,
   note TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL,
-  UNIQUE(user_id, day)
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS shares (
@@ -49,7 +49,41 @@ CREATE TABLE IF NOT EXISTS grants (
   created_at TEXT NOT NULL,
   UNIQUE (owner_id, viewer_id)
 );
+`)
 
+// 早期版本 records 表带 UNIQUE(user_id, day)，一天只能存一颗扭蛋。
+// 现在一天可以有多颗，需要去掉该约束；SQLite 不支持直接删约束，只能重建表。
+function recordsHasUniqueDay() {
+  const indexes = db.prepare(`SELECT name, "unique" AS isUnique FROM pragma_index_list('records')`).all()
+  return indexes.some((index) => {
+    if (!index.isUnique) return false
+    const columns = db.prepare('SELECT name FROM pragma_index_info(?)').all(index.name).map((c) => c.name)
+    return columns.length === 2 && columns.includes('user_id') && columns.includes('day')
+  })
+}
+
+if (recordsHasUniqueDay()) {
+  db.transaction(() => {
+    db.exec(`
+      DROP TABLE IF EXISTS records_migrate;
+      CREATE TABLE records_migrate (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        day TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO records_migrate (id, user_id, day, score, note, created_at, updated_at)
+        SELECT id, user_id, day, score, note, updated_at, updated_at FROM records;
+      DROP TABLE records;
+      ALTER TABLE records_migrate RENAME TO records;
+    `)
+  })()
+}
+
+db.exec(`
 CREATE INDEX IF NOT EXISTS idx_records_user_day ON records(user_id, day);
 CREATE INDEX IF NOT EXISTS idx_grants_viewer ON grants(viewer_id);
 `)

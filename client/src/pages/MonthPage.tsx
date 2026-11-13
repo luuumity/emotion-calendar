@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, type Granted, type RecordItem } from '../lib/api'
-import { averageScore, computeCompat } from '../lib/compat'
+import { averageScore, computeCompat, dailyAverages, type DayAverage } from '../lib/compat'
 import { scoreColor, scoreSoftColor } from '../lib/colors'
 import { dayOfMonth, monthMeta, shiftMonth, todayString } from '../lib/date'
 import { ScoreLegend } from '../components/ScoreBits'
 import { errorMessage } from '../context/AuthContext'
 
-function MonthChart({ mine, theirs, daysInMonth }: { mine: RecordItem[]; theirs: RecordItem[]; daysInMonth: number }) {
+function MonthChart({ mine, theirs, daysInMonth }: { mine: DayAverage[]; theirs: DayAverage[]; daysInMonth: number }) {
   const width = 300
   const height = 118
   const x = (day: string) => 10 + ((dayOfMonth(day) - 1) / Math.max(1, daysInMonth - 1)) * (width - 20)
   const y = (score: number) => 105 - (score / 100) * 92
 
-  const line = (records: RecordItem[]) =>
+  const line = (records: DayAverage[]) =>
     records
       .slice()
       .sort((a, b) => a.day.localeCompare(b.day))
@@ -143,8 +143,10 @@ export function MonthPage() {
     }
   }, [compareId, meta.from, meta.to])
 
-  const myMap = useMemo(() => new Map(myRecords.map((r) => [r.day, r])), [myRecords])
-  const theirMap = useMemo(() => new Map(theirRecords.map((r) => [r.day, r])), [theirRecords])
+  const myDaily = useMemo(() => dailyAverages(myRecords), [myRecords])
+  const theirDaily = useMemo(() => dailyAverages(theirRecords), [theirRecords])
+  const myMap = useMemo(() => new Map(myDaily.map((r) => [r.day, r])), [myDaily])
+  const theirMap = useMemo(() => new Map(theirDaily.map((r) => [r.day, r])), [theirDaily])
   const comparePerson = granted.find((g) => g.id === compareId) || null
   const compat = useMemo(() => computeCompat(myRecords, theirRecords), [myRecords, theirRecords])
   const myAvg = averageScore(myRecords)
@@ -173,7 +175,7 @@ export function MonthPage() {
       <section className="page-head">
         <div>
           <h1>月视图</h1>
-          <p className="sub">每个日期是一天的颜色。深红是难受，深绿是舒服，中间就是磨合。</p>
+          <p className="sub">每个日期是当天所有扭蛋的平均色。深红是难受，深绿是舒服，中间就是磨合。</p>
         </div>
         <div className="month-nav">
           <button type="button" className="icon-btn" onClick={() => goMonth(-1)} aria-label="上个月">
@@ -219,14 +221,14 @@ export function MonthPage() {
         <StatCard
           label="我的平均"
           value={myAvg ?? '—'}
-          hint={myRecords.length ? `${myRecords.length} 天有记录` : '这个月还没记录'}
+          hint={myDaily.length ? `${myDaily.length} 天有记录` : '这个月还没记录'}
           tone="ink"
         />
         {comparePerson && (
           <StatCard
             label={`${comparePerson.displayName} 的平均`}
             value={theirAvg ?? '—'}
-            hint={theirRecords.length ? `${theirRecords.length} 天有记录` : '对方这个月还没记录'}
+            hint={theirDaily.length ? `${theirDaily.length} 天有记录` : '对方这个月还没记录'}
             tone="ink"
           />
         )}
@@ -284,12 +286,14 @@ export function MonthPage() {
                   title={
                     future
                       ? '还没到这一天'
-                      : `${cell.day}${mine ? ` · 我 ${mine.score}` : ''}${theirs ? ` · TA ${theirs.score}` : ''}`
+                      : `${cell.day}${mine ? ` · 我 ${Math.round(mine.score)}（${mine.count} 颗）` : ''}${
+                          theirs ? ` · TA ${Math.round(theirs.score)}（${theirs.count} 颗）` : ''
+                        }`
                   }
                 >
                   <span className="cell-top">
                     <span className="cell-num">{cell.num}</span>
-                    {mine && <span className="cell-score">{mine.score}</span>}
+                    {mine && <span className="cell-score">{Math.round(mine.score)}</span>}
                   </span>
                   <span className="cell-bars">
                     <span
@@ -389,7 +393,7 @@ export function MonthPage() {
                 )}
               </span>
             </div>
-            <MonthChart mine={myRecords} theirs={comparePerson ? theirRecords : []} daysInMonth={meta.daysInMonth} />
+            <MonthChart mine={myDaily} theirs={comparePerson ? theirDaily : []} daysInMonth={meta.daysInMonth} />
             <div className="chart-axis">
               <span>1 日</span>
               <span>{meta.daysInMonth} 日</span>

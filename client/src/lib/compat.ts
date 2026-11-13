@@ -10,9 +10,28 @@ export type CompatResult = {
   series: Array<{ day: string; mine: number; theirs: number; diff: number }>
 }
 
+export type DayAverage = { day: string; score: number; count: number }
+
+/** 一天可以有多颗扭蛋，按月/按天展示时统一取当天所有扭蛋的平均分。 */
+export function dailyAverages(records: RecordItem[]): DayAverage[] {
+  const acc = new Map<string, { sum: number; count: number }>()
+  for (const record of records) {
+    const bucket = acc.get(record.day)
+    if (bucket) {
+      bucket.sum += record.score
+      bucket.count += 1
+    } else {
+      acc.set(record.day, { sum: record.score, count: 1 })
+    }
+  }
+  return Array.from(acc.entries())
+    .map(([day, bucket]) => ({ day, score: bucket.sum / bucket.count, count: bucket.count }))
+    .sort((a, b) => a.day.localeCompare(b.day))
+}
+
 export function computeCompat(mine: RecordItem[], theirs: RecordItem[]): CompatResult {
-  const mineMap = new Map(mine.map((r) => [r.day, r.score]))
-  const series = theirs
+  const mineMap = new Map(dailyAverages(mine).map((r) => [r.day, r.score]))
+  const series = dailyAverages(theirs)
     .filter((r) => mineMap.has(r.day))
     .map((r) => ({
       day: r.day,

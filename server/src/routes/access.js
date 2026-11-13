@@ -160,16 +160,16 @@ router.get('/people/:ownerId/records', (req, res) => {
   if (!grant || grant.revoked) return res.status(403).json({ error: '你没有查看这个人的授权' })
 
   const rows = db
-    .prepare('SELECT day, score, note FROM records WHERE user_id = ? AND day BETWEEN ? AND ? ORDER BY day')
+    .prepare('SELECT id, day, score, note, created_at, updated_at FROM records WHERE user_id = ? AND day BETWEEN ? AND ? ORDER BY day, id')
     .all(ownerId, from, to)
 
   res.json({
     owner: { id: grant.owner_id, displayName: grant.display_name },
     scope: grant.scope,
     records: rows.map((r) => {
-      if (grant.scope === 'full') return { day: r.day, score: r.score, note: r.note }
-      const { note, ...rest } = r
-      return { ...rest, hasNote: Boolean(note && note.trim()) }
+      const base = { id: r.id, day: r.day, score: r.score, createdAt: r.created_at, updatedAt: r.updated_at }
+      if (grant.scope === 'full') return { ...base, note: r.note }
+      return { ...base, hasNote: Boolean(r.note && r.note.trim()) }
     })
   })
 })

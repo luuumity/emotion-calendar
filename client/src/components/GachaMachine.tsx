@@ -2,9 +2,9 @@ import { useEffect, useRef } from 'react'
 import Matter from 'matter-js'
 import { isDark, scoreRGB } from '../lib/colors'
 
-export type GachaBall = { day: string; score: number }
+export type GachaBall = { id: number; score: number; index: number }
 
-type BallMeta = { day: string; score: number }
+type BallMeta = GachaBall
 type MetaBody = Matter.Body & { meta: BallMeta }
 
 const W = 460
@@ -86,31 +86,31 @@ function drawBall(ctx: CanvasRenderingContext2D, body: MetaBody, selected: boole
   ctx.font = '700 18px ui-sans-serif, system-ui, -apple-system, "PingFang SC", sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(String(Number(body.meta.day.slice(8, 10))), 0, 1)
+  ctx.fillText(String(body.meta.index), 0, 1)
 
   ctx.restore()
 }
 
 export function GachaMachine({
-  monthKey,
+  stageKey,
   balls,
-  selectedDay,
-  onSelectDay
+  selectedId,
+  onSelect
 }: {
-  monthKey: string
+  stageKey: string
   balls: GachaBall[]
-  selectedDay: string
-  onSelectDay: (day: string) => void
+  selectedId: number | null
+  onSelect: (id: number | null) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const engineRef = useRef<Matter.Engine | null>(null)
-  const ballMapRef = useRef<Map<string, MetaBody>>(new Map())
-  const selectedRef = useRef(selectedDay)
-  const selectRef = useRef(onSelectDay)
+  const ballMapRef = useRef<Map<number, MetaBody>>(new Map())
+  const selectedRef = useRef(selectedId)
+  const selectRef = useRef(onSelect)
   const countRef = useRef(0)
 
-  selectedRef.current = selectedDay
-  selectRef.current = onSelectDay
+  selectedRef.current = selectedId
+  selectRef.current = onSelect
   countRef.current = balls.length
 
   useEffect(() => {
@@ -127,7 +127,6 @@ export function GachaMachine({
     engine.gravity.y = 1
     engineRef.current = engine
     ballMapRef.current = new Map()
-
     const wallStyle = { isStatic: true, restitution: 0.2, friction: 0.1 }
     Matter.Composite.add(engine.world, [
       Matter.Bodies.rectangle(4, 300, 60, 900, wallStyle),
@@ -154,11 +153,14 @@ export function GachaMachine({
 
     const handleDown = (event: PointerEvent) => {
       const ball = findBall(event.clientX, event.clientY)
-      if (!ball) return
+      if (!ball) {
+        selectRef.current(null)
+        return
+      }
       Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.15)
       Matter.Sleeping.set(ball, false)
       Matter.Body.setVelocity(ball, { x: ball.velocity.x, y: -2.2 })
-      selectRef.current(ball.meta.day)
+      selectRef.current(ball.meta.id === selectedRef.current ? null : ball.meta.id)
     }
 
     const handleMove = (event: PointerEvent) => {
@@ -226,7 +228,7 @@ export function GachaMachine({
       ctx.fillRect(0, 0, W, H)
 
       for (const body of ballMapRef.current.values()) {
-        drawBall(ctx, body, body.meta.day === selectedRef.current)
+        drawBall(ctx, body, body.meta.id === selectedRef.current)
       }
 
       if (countRef.current === 0) {
@@ -293,34 +295,34 @@ export function GachaMachine({
       engineRef.current = null
       ballMapRef.current.clear()
     }
-  }, [monthKey])
+  }, [stageKey])
 
   useEffect(() => {
     const engine = engineRef.current
     if (!engine) return
     const map = ballMapRef.current
 
-    const present = new Set(balls.map((b) => b.day))
-    for (const [day, body] of Array.from(map.entries())) {
-      if (!present.has(day)) {
+    const present = new Set(balls.map((b) => b.id))
+    for (const [id, body] of Array.from(map.entries())) {
+      if (!present.has(id)) {
         Matter.Composite.remove(engine.world, body)
-        map.delete(day)
+        map.delete(id)
       }
     }
 
     for (const ball of balls) {
-      const existing = map.get(ball.day)
+      const existing = map.get(ball.id)
       if (existing) {
-        if (existing.meta.score !== ball.score) {
+        if (existing.meta.score !== ball.score || existing.meta.index !== ball.index) {
           existing.meta.score = ball.score
+          existing.meta.index = ball.index
           Matter.Sleeping.set(existing, false)
           Matter.Body.setVelocity(existing, { x: (Math.random() - 0.5) * 1.2, y: -1.6 })
         }
         continue
       }
 
-      const n = Number(ball.day.slice(8, 10))
-      const x = 66 + ((n * 53) % 328) + (Math.random() - 0.5) * 14
+      const x = 66 + ((ball.id * 53) % 328) + (Math.random() - 0.5) * 14
       const body = Matter.Bodies.circle(x, 72, RADIUS, {
         restitution: 0.32,
         friction: 0.04,
@@ -328,12 +330,12 @@ export function GachaMachine({
         density: 0.0012,
         sleepThreshold: 80
       }) as MetaBody
-      body.meta = { day: ball.day, score: ball.score }
+      body.meta = { id: ball.id, score: ball.score, index: ball.index }
       Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.08)
       Matter.Composite.add(engine.world, body)
-      map.set(ball.day, body)
+      map.set(ball.id, body)
     }
-  }, [balls, monthKey])
+  }, [balls, stageKey])
 
   return (
     <div className="gacha-stage">

@@ -12,6 +12,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 type DragState = { score: number; x: number; y: number; over: boolean }
 
+function sortById(records: RecordItem[]) {
+  return records.slice().sort((a, b) => a.id - b.id)
+}
+
 export function DayPage() {
   const params = useParams()
   const navigate = useNavigate()
@@ -22,6 +26,7 @@ export function DayPage() {
 
   const [granted, setGranted] = useState<Granted[]>([])
   const [records, setRecords] = useState<RecordItem[]>([])
+  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [scope, setScope] = useState<'colors' | 'full' | null>(null)
   const [ownerName, setOwnerName] = useState('')
   const [loading, setLoading] = useState(true)
@@ -59,20 +64,21 @@ export function DayPage() {
     let alive = true
     setLoading(true)
     setRecords([])
+    setSelectedId(null)
     setError('')
 
     const load = async () => {
       try {
         if (asId == null) {
-          const res = await api.listRecords(meta.from, meta.to)
+          const res = await api.listRecords(date, date)
           if (!alive) return
-          setRecords(res.records)
+          setRecords(sortById(res.records))
           setScope(null)
           setOwnerName('')
         } else {
-          const res = await api.personRecords(asId, meta.from, meta.to)
+          const res = await api.personRecords(asId, date, date)
           if (!alive) return
-          setRecords(res.records)
+          setRecords(sortById(res.records))
           setScope(res.scope)
           setOwnerName(res.owner.displayName)
         }
@@ -91,26 +97,29 @@ export function DayPage() {
     return () => {
       alive = false
     }
-  }, [asId, meta.from, meta.to])
+  }, [asId, date])
 
-  const record = records.find((r) => r.day === date) || null
-  const recordNote = record?.note
+  const selected = records.find((r) => r.id === selectedId) || null
+  const selectedNote = selected?.note
+  const average = records.length
+    ? Math.round(records.reduce((sum, r) => sum + r.score, 0) / records.length)
+    : null
 
   useEffect(() => {
-    setNoteDraft(recordNote ?? '')
+    setNoteDraft(selectedNote ?? '')
     setDirty(false)
     setSaveState('idle')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [record?.day, recordNote, asId])
+  }, [selected?.id, selectedNote, asId])
 
   useEffect(() => {
-    if (!dirty || !editable || !record) return undefined
+    if (!dirty || !editable || !selected) return undefined
     const timer = setTimeout(() => {
       void saveNote(noteDraft)
     }, 900)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteDraft, dirty, editable, record?.day])
+  }, [noteDraft, dirty, editable, selected?.id])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -121,8 +130,11 @@ export function DayPage() {
   const isFuture = date > today
   const canEdit = editable && !isFuture
 
-  const balls: GachaBall[] = useMemo(() => records.map((r) => ({ day: r.day, score: r.score })), [records])
-  const monthKey = `${meta.year}-${meta.month}-${asId ?? 'me'}`
+  const balls: GachaBall[] = useMemo(
+    () => records.map((r, index) => ({ id: r.id, score: r.score, index: index + 1 })),
+    [records]
+  )
+  const stageKey = `${date}-${asId ?? 'me'}`
 
   function goDay(offset: number) {
     const d = parseDay(date)
@@ -132,22 +144,33 @@ export function DayPage() {
     navigate(`/day/${next}${asId ? `?as=${asId}` : ''}`)
   }
 
+  function replaceRecord(record: RecordItem) {
+    setRecords((prev) => sortById(prev.map((r) => (r.id === record.id ? record : r))))
+  }
+
   async function applyScore(score: number) {
     if (!canEdit) return
-    const optimistic: RecordItem = { day: date, score, note: noteDraft || record?.note || '' }
-    setRecords((prev) => {
-      const others = prev.filter((r) => r.day !== date)
-      return [...others, optimistic].sort((a, b) => a.day.localeCompare(b.day))
-    })
     setSaveState('saving')
+
+    if (selected) {
+      try {
+        const res = await api.updateRecord(selected.id, { score })
+        replaceRecord(res.record)
+        setSaveState('saved')
+        setToast(`第 ${balls.find((b) => b.id === selected.id)?.index ?? ''} 颗改成 ${score} 分 · ${scoreLabel(score)}`)
+      } catch (err) {
+        setSaveState('error')
+        setToast(errorMessage(err))
+      }
+      return
+    }
+
     try {
-      const res = await api.saveRecord(date, score, noteDraft)
-      setRecords((prev) => {
-        const others = prev.filter((r) => r.day !== date)
-        return [...others, res.record].sort((a, b) => a.day.localeCompare(b.day))
-      })
+      const res = await api.createRecord(date, score)
+      setRecords((prev) => sortById([...prev, res.record]))
+      setSelectedId(res.record.id)
       setSaveState('saved')
-      setToast(`已记录 ${score} 分 · ${scoreLabel(score)}`)
+      setToast(`已投进一颗 ${score} 分 · ${scoreLabel(score)}`)
     } catch (err) {
       setSaveState('error')
       setToast(errorMessage(err))
@@ -155,14 +178,11 @@ export function DayPage() {
   }
 
   async function saveNote(text: string) {
-    if (!canEdit || !record) return
+    if (!canEdit || !selected) return
     setSaveState('saving')
     try {
-      const res = await api.saveRecord(date, record.score, text)
-      setRecords((prev) => {
-        const others = prev.filter((r) => r.day !== date)
-        return [...others, res.record].sort((a, b) => a.day.localeCompare(b.day))
-      })
+      const res = await api.updateRecord(selected.id, { note: text })
+      replaceRecord(res.record)
       setDirty(false)
       setSaveState('saved')
     } catch (err) {
@@ -171,15 +191,23 @@ export function DayPage() {
     }
   }
 
+  function handleSelect(nextId: number | null) {
+    // 切换选中前先把没保存的理由写掉，避免因为取消选中而丢失输入。
+    if (nextId !== selectedId && dirty && editable && selected) void saveNote(noteDraft)
+    setSelectedId(nextId)
+  }
+
   async function handleDelete() {
-    if (!canEdit || !record) return
-    if (!window.confirm('确定要删掉这一天的记录吗？')) return
+    if (!canEdit || !selected) return
+    const index = balls.find((b) => b.id === selected.id)?.index ?? ''
+    if (!window.confirm(`确定要删掉第 ${index} 颗扭蛋吗？`)) return
     try {
-      await api.deleteRecord(date)
-      setRecords((prev) => prev.filter((r) => r.day !== date))
+      await api.deleteRecord(selected.id)
+      setRecords((prev) => prev.filter((r) => r.id !== selected.id))
+      setSelectedId(null)
       setNoteDraft('')
       setSaveState('idle')
-      setToast('这一天的记录已删除')
+      setToast('这颗扭蛋已删除')
     } catch (err) {
       setToast(errorMessage(err))
     }
@@ -236,7 +264,7 @@ export function DayPage() {
   }
 
   const showNote = asId == null || scope === 'full'
-  const doneDays = records.length
+  const selectedIndex = selected ? balls.find((b) => b.id === selected.id)?.index ?? null : null
 
   return (
     <div className="page day-page">
@@ -292,7 +320,7 @@ export function DayPage() {
             <div>
               <h2>{machineOwner === '我' ? '我的扭蛋机' : `${machineOwner} 的扭蛋机`}</h2>
               <p className="machine-sub">
-                {meta.label} · {doneDays} 颗扭蛋
+                {meta.label} · {records.length} 颗扭蛋{average != null ? ` · 平均 ${average} 分` : ''}
               </p>
             </div>
             <span className={editable ? 'status-dot editable' : 'status-dot readonly'}>
@@ -301,20 +329,17 @@ export function DayPage() {
           </div>
 
           <div ref={machineRef} className={drag?.over ? 'machine-wrap drop-active' : 'machine-wrap'}>
-            <GachaMachine
-              monthKey={monthKey}
-              balls={balls}
-              selectedDay={date}
-              onSelectDay={(day) => {
-                if (day === date) return
-                navigate(`/day/${day}${asId ? `?as=${asId}` : ''}`)
-              }}
-            />
-            {drag?.over && <div className="drop-hint">松手，投进这一天</div>}
+            <GachaMachine stageKey={stageKey} balls={balls} selectedId={selectedId} onSelect={handleSelect} />
+            {drag?.over && <div className="drop-hint">{selected ? '松手，改成这个分数' : '松手，投进扭蛋机'}</div>}
           </div>
 
           {canEdit ? (
-            <SwatchRail selectedScore={record?.score ?? null} onDragStart={startDrag} />
+            <SwatchRail
+              selectedScore={selected?.score ?? null}
+              onDragStart={startDrag}
+              title={selected ? `拖动色块修改第 ${selectedIndex} 颗` : '拖动色块投进扭蛋机'}
+              hint={selected ? '点空白处取消选中，再投新的' : '或直接点一下'}
+            />
           ) : (
             <div className="readonly-strip">
               {isFuture ? '还没到这一天，不能记录。' : `这是 ${machineOwner} 的扭蛋机，只能看，不能改。`}
@@ -326,40 +351,46 @@ export function DayPage() {
           <section className="card record-card">
             <div className="record-head">
               <div>
-                <span className="record-kicker">{editable ? '我这一天的感受' : `${machineOwner} 的感受`}</span>
+                <span className="record-kicker">
+                  {editable ? '我这一天的感受' : `${machineOwner} 的感受`}
+                </span>
                 <h2>{Number(date.slice(8, 10))} 日</h2>
               </div>
-              {record ? (
+              {selected ? (
                 <span
                   className="score-chip"
                   style={{
-                    background: scoreSoftColor(record.score, 0.16),
-                    color: scoreColor(record.score)
+                    background: scoreSoftColor(selected.score, 0.16),
+                    color: scoreColor(selected.score)
                   }}
                 >
-                  {record.score}
+                  {selected.score}
                   <small>分</small>
                 </span>
+              ) : average != null ? (
+                <span className="score-chip muted">均值 {average}</span>
               ) : (
                 <span className="score-chip muted">未记录</span>
               )}
             </div>
 
-            {record ? (
+            {selected ? (
               <>
                 <div className="score-hero">
-                  <div className="capsule-preview" style={{ background: scoreColor(record.score) }}>
-                    <span style={{ color: isDark(record.score) ? '#fffaf2' : '#2f2a25' }}>{scoreLabel(record.score)}</span>
+                  <div className="capsule-preview" style={{ background: scoreColor(selected.score) }}>
+                    <span style={{ color: isDark(selected.score) ? '#fffaf2' : '#2f2a25' }}>{scoreLabel(selected.score)}</span>
                   </div>
                   <div className="score-meta">
-                    <strong>{scoreLabel(record.score)}</strong>
-                    <span>强度 {record.score} / 100</span>
+                    <strong>{scoreLabel(selected.score)}</strong>
+                    <span>
+                      第 {selectedIndex} 颗 · 强度 {selected.score} / 100
+                    </span>
                   </div>
                 </div>
 
                 <div className="note-block">
                   <div className="note-head">
-                    <span>当时的理由</span>
+                    <span>这一颗的理由</span>
                     {editable && (
                       <span className={`save-state ${saveState}`}>
                         {saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已保存' : saveState === 'error' ? '保存失败' : ''}
@@ -375,7 +406,7 @@ export function DayPage() {
                         className="note-input"
                         value={noteDraft}
                         maxLength={2000}
-                        placeholder="当时为什么是这个颜色？写给自己看，也可以授权给对方看。"
+                        placeholder="这一颗为什么是这个颜色？写给自己看，也可以授权给对方看。"
                         onChange={(event) => {
                           setNoteDraft(event.target.value)
                           setDirty(true)
@@ -397,18 +428,26 @@ export function DayPage() {
                       </div>
                     </>
                   ) : (
-                    <div className="note-readonly">{record.note?.trim() ? record.note : '这一天 TA 没有写下理由。'}</div>
+                    <div className="note-readonly">{selected.note?.trim() ? selected.note : '这一颗 TA 没有写下理由。'}</div>
                   )}
                 </div>
 
                 {editable && (
                   <div className="record-actions">
                     <button type="button" className="ghost-btn danger small" onClick={handleDelete}>
-                      删除这一天
+                      删除这一颗
                     </button>
                   </div>
                 )}
               </>
+            ) : records.length > 0 ? (
+              <div className="record-empty">
+                <p>
+                  这一天有 {records.length} 颗扭蛋，平均 {average} 分。
+                  {editable ? '点一下任意一颗，看当时的分数和理由。' : '点一下任意一颗，看看 TA 当时的感受。'}
+                </p>
+                <span className="empty-arrow">↖ 点击扭蛋可以选中</span>
+              </div>
             ) : (
               <div className="record-empty">
                 <p>
@@ -431,9 +470,10 @@ export function DayPage() {
           <section className="card tip-card">
             <h3>怎么玩</h3>
             <ol>
-              <li>从红色到绿色，挑一个最接近今天感受的颜色。</li>
-              <li>拖进扭蛋机，它会和过去的扭蛋撞在一起。</li>
-              <li>点开任意一颗扭蛋，补上当时的理由。</li>
+              <li>从红色到绿色，挑一个最接近此刻感受的颜色。</li>
+              <li>拖进扭蛋机，同一天可以投很多颗，月视图取平均。</li>
+              <li>点开任意一颗，补上当时的理由；再拖色块就能改这一颗。</li>
+              <li>点一下空白处取消选中，就能继续投新的。</li>
             </ol>
           </section>
         </aside>

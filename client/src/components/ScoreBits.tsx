@@ -14,17 +14,21 @@ export function ScoreLegend({ compact = false }: { compact?: boolean }) {
 export function SwatchRail({
   selectedScore,
   disabled,
-  onDragStart
+  onDragStart,
+  title = '拖动色块投进扭蛋机',
+  hint = '或直接点一下'
 }: {
   selectedScore?: number | null
   disabled?: boolean
   onDragStart: (score: number, event: PointerEvent) => void
+  title?: string
+  hint?: string
 }) {
   return (
     <div className={disabled ? 'swatch-rail disabled' : 'swatch-rail'}>
       <div className="swatch-head">
-        <span className="swatch-title">拖动色块投进扭蛋机</span>
-        <span className="swatch-sub">或直接点一下</span>
+        <span className="swatch-title">{title}</span>
+        <span className="swatch-sub">{hint}</span>
       </div>
       <div className="swatch-row">
         {SWATCH_SCORES.map((score) => {

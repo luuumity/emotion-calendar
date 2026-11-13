@@ -1,10 +1,12 @@
 export type User = { id: number; username: string; displayName: string }
 
 export type RecordItem = {
+  id: number
   day: string
   score: number
   note?: string
   hasNote?: boolean
+  createdAt?: string
   updatedAt?: string
 }
 
@@ -77,12 +79,14 @@ export const api = {
   logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),
 
   listRecords: (from: string, to: string) => request<{ records: RecordItem[] }>(`/records?from=${from}&to=${to}`),
-  saveRecord: (day: string, score: number, note?: string) =>
-    request<{ record: RecordItem }>(`/records/${day}`, {
-      method: 'PUT',
-      body: JSON.stringify(note === undefined ? { score } : { score, note })
+  createRecord: (day: string, score: number, note?: string) =>
+    request<{ record: RecordItem }>('/records', {
+      method: 'POST',
+      body: JSON.stringify(note === undefined ? { day, score } : { day, score, note })
     }),
-  deleteRecord: (day: string) => request<{ ok: true }>(`/records/${day}`, { method: 'DELETE' }),
+  updateRecord: (id: number, patch: { score?: number; note?: string }) =>
+    request<{ record: RecordItem }>(`/records/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteRecord: (id: number) => request<{ ok: true }>(`/records/${id}`, { method: 'DELETE' }),
 
   access: () => request<AccessInfo>('/access'),
   createShare: (scope: 'colors' | 'full', label: string) =>
