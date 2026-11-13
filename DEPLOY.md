@@ -257,7 +257,7 @@ cp /opt/emotion-calendar/backups/emotion-2026-11-13-0310.db /opt/emotion-calenda
 systemctl start emotion-calendar
 ```
 
-以上是**服务器本地备份**（保留 14 天）。异地容灾另有**每日加密上传阿里云 OSS**（云端永久归档），配置手册见 [OSS-SETUP.md](./OSS-SETUP.md)。
+以上是**服务器本地备份**（保留 14 天）。异地容灾另有**每日上传阿里云 OSS**（云端永久归档，可选加密，脚本 `scripts/backup-to-oss.sh`），配置手册见 [OSS-SETUP.md](./OSS-SETUP.md)。
 
 ## 12. 常见问题
 
