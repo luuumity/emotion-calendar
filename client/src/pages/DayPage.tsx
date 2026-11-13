@@ -38,6 +38,10 @@ export function DayPage() {
   const [drag, setDrag] = useState<DragState | null>(null)
   const machineRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ score: number; startX: number; startY: number; moved: boolean } | null>(null)
+  const draftRef = useRef(noteDraft)
+  const selectedNoteRef = useRef<string | undefined>(undefined)
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve())
+  const lastSavedRef = useRef<{ id: number; text: string } | null>(null)
 
   const meta = useMemo(() => {
     const d = parseDay(date)
@@ -105,21 +109,16 @@ export function DayPage() {
     ? Math.round(records.reduce((sum, r) => sum + r.score, 0) / records.length)
     : null
 
+  draftRef.current = noteDraft
+  selectedNoteRef.current = selectedNote
+
   useEffect(() => {
-    setNoteDraft(selectedNote ?? '')
+    // 只在切换扭蛋时用服务器内容重置草稿，避免保存回包覆盖正在输入的文字
+    setNoteDraft(selectedNoteRef.current ?? '')
     setDirty(false)
     setSaveState('idle')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, selectedNote, asId])
-
-  useEffect(() => {
-    if (!dirty || !editable || !selected) return undefined
-    const timer = setTimeout(() => {
-      void saveNote(noteDraft)
-    }, 900)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteDraft, dirty, editable, selected?.id])
+  }, [selected?.id, asId])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -135,6 +134,27 @@ export function DayPage() {
     [records]
   )
   const stageKey = `${date}-${asId ?? 'me'}`
+
+  // 切到后台 / 关闭页面时兜底保存，避免手机切换应用时丢掉没失焦的文字
+  useEffect(() => {
+    const flush = () => {
+      if (dirty && editable && selected && canEdit) void saveNote(noteDraft)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    const onPageHide = () => {
+      if (!dirty || !editable || !selected || !canEdit) return
+      void api.updateRecord(selected.id, { note: noteDraft }, { keepalive: true }).catch(() => {})
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', onPageHide)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirty, editable, selected, noteDraft, canEdit])
 
   function goDay(offset: number) {
     const d = parseDay(date)
@@ -179,16 +199,30 @@ export function DayPage() {
 
   async function saveNote(text: string) {
     if (!canEdit || !selected) return
-    setSaveState('saving')
-    try {
-      const res = await api.updateRecord(selected.id, { note: text })
-      replaceRecord(res.record)
+    const recordId = selected.id
+    if (lastSavedRef.current?.id === recordId && lastSavedRef.current.text === text) {
       setDirty(false)
-      setSaveState('saved')
-    } catch (err) {
-      setSaveState('error')
-      setToast(errorMessage(err))
+      return
     }
+    // 串行保存：保证最后一次输入最后落库，不会被旧请求覆盖
+    saveChainRef.current = saveChainRef.current.then(async () => {
+      setSaveState('saving')
+      try {
+        const res = await api.updateRecord(recordId, { note: text })
+        replaceRecord(res.record)
+        lastSavedRef.current = { id: recordId, text }
+        if (draftRef.current === text) {
+          setDirty(false)
+          setSaveState('saved')
+        } else {
+          // 保存期间又继续输入了，草稿保持“未保存”，下次失焦再存
+          setSaveState('idle')
+        }
+      } catch (err) {
+        setSaveState('error')
+        setToast(errorMessage(err))
+      }
+    })
   }
 
   function handleSelect(nextId: number | null) {
