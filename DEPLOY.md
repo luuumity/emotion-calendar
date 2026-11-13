@@ -259,6 +259,28 @@ systemctl start emotion-calendar
 
 以上是**服务器本地备份**（保留 14 天）。异地容灾另有**每日上传阿里云 OSS**（云端永久归档，可选加密，脚本 `scripts/backup-to-oss.sh`），配置手册见 [OSS-SETUP.md](./OSS-SETUP.md)。
 
+OSS 备份的每日 cron（root，与本地备份错开，已配置）：
+
+```
+40 3 * * * /opt/emotion-calendar/scripts/backup-to-oss.sh >> /var/log/emotion-oss-backup.log 2>&1
+```
+
+从 OSS 恢复（把文件名换成要恢复的备份）：
+
+```bash
+source /etc/emotion-backup/oss.env
+ossutil64 -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" \
+  cp -f "oss://${OSS_BUCKET}/backups/emotion-YYYY-MM-DD-HHMM.db.gz" /tmp/restore.db.gz
+gunzip -f /tmp/restore.db.gz
+sqlite3 /tmp/restore.db "PRAGMA integrity_check;"   # 应输出 ok
+systemctl stop emotion-calendar
+cp /tmp/restore.db /opt/emotion-calendar/data/emotion.db
+systemctl start emotion-calendar
+```
+
+> 若备份是加密版（`.gpg`），先解密再解压：`gpg --batch --passphrase-file /etc/emotion-backup/gpg-passphrase -o /tmp/restore.db.gz -d /tmp/restore.db.gz.gpg`。
+> **换新服务器时**：除按本手册重建外，还需把 RAM 策略里的 `acs:SourceIp` 改成新服务器 IP，否则 OSS 上传会被拒绝。
+
 ## 12. 常见问题
 
 | 现象 | 排查 |

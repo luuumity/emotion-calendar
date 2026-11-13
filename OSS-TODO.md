@@ -34,8 +34,8 @@
 - [x] 安装 ossutil 到 `/usr/local/bin/ossutil64`
 - [x] 手动执行首次备份（当时为加密版）：`backups/emotion-2026-11-13-2347.db.gz.gpg`（4014 字节，云端已校验）
 - [x] 不加密版验证（默认模式）：`backups/emotion-2026-11-14-0003.db.gz`（3917 字节，encrypt=0），此后每日上传均为不加密 .db.gz
-- [ ] 每日 cron（与本地 03:10 备份错开）
-- [ ] 恢复演练（下载 → 解 gzip → sqlite3 校验完整性）
+- [x] 每日 cron（03:40，与本地 03:10 错开；日志 `/var/log/emotion-oss-backup.log`）
+- [x] 恢复演练（2026-11-14：下载 `emotion-2026-11-14-0003.db.gz` → gzip 校验 OK → `integrity_check=ok`，表结构完整、19 条记录；全程临时目录，未动生产库）
 - [ ] （建议项，仅开启加密时相关）在服务器之外离线保存加密口令；当前默认不加密，无需操作
 
 ---
