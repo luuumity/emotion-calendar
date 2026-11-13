@@ -1018,7 +1018,7 @@ p {
 
 .gacha-stage {
   width: 100%;
-  max-width: 460px;
+  max-width: 400px;
   margin: 0 auto;
 }
 
@@ -1026,7 +1026,8 @@ p {
   display: block;
   width: 100%;
   height: auto;
-  touch-action: none;
+  /* 允许从扭蛋机上滑动页面，同时保留点按选中扭蛋的能力 */
+  touch-action: pan-y;
 }
 
 .drop-hint {

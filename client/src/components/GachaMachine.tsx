@@ -7,25 +7,15 @@ export type GachaBall = { id: number; score: number; index: number }
 type BallMeta = GachaBall
 type MetaBody = Matter.Body & { meta: BallMeta }
 
-const W = 460
-const H = 680
-const DOME = { x: 24, y: 24, w: 412, h: 560, r: 64 }
+const W = 400
+const H = 490
+const CX = 200
+const CY = 182
+const R = 158
 const RADIUS = 25
-
-function domePath(ctx: CanvasRenderingContext2D) {
-  const { x, y, w, h, r } = DOME
-  ctx.beginPath()
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + w - r, y)
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
-  ctx.lineTo(x + w, y + h - r)
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  ctx.lineTo(x + r, y + h)
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-  ctx.lineTo(x, y + r)
-  ctx.quadraticCurveTo(x, y, x + r, y)
-  ctx.closePath()
-}
+const WALL_T = 26
+const RING_R = R - 3 - WALL_T / 2
+const SEGMENTS = 48
 
 function drawBall(ctx: CanvasRenderingContext2D, body: MetaBody, selected: boolean) {
   const { x, y } = body.position
@@ -127,13 +117,22 @@ export function GachaMachine({
     engine.gravity.y = 1
     engineRef.current = engine
     ballMapRef.current = new Map()
-    const wallStyle = { isStatic: true, restitution: 0.2, friction: 0.1 }
-    Matter.Composite.add(engine.world, [
-      Matter.Bodies.rectangle(4, 300, 60, 900, wallStyle),
-      Matter.Bodies.rectangle(456, 300, 60, 900, wallStyle),
-      Matter.Bodies.rectangle(230, 596, 500, 60, wallStyle),
-      Matter.Bodies.rectangle(230, 10, 500, 60, wallStyle)
-    ])
+
+    // 圆形玻璃罩用一圈静态短墙近似，扭蛋会自然堆在罩底。
+    const walls: Matter.Body[] = []
+    for (let i = 0; i < SEGMENTS; i += 1) {
+      const angle = (i / SEGMENTS) * Math.PI * 2
+      const length = ((Math.PI * 2 * RING_R) / SEGMENTS) * 1.3
+      walls.push(
+        Matter.Bodies.rectangle(CX + Math.cos(angle) * RING_R, CY + Math.sin(angle) * RING_R, length, WALL_T, {
+          isStatic: true,
+          restitution: 0.2,
+          friction: 0.1,
+          angle: angle + Math.PI / 2
+        })
+      )
+    }
+    Matter.Composite.add(engine.world, walls)
 
     const findBall = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect()
@@ -175,45 +174,60 @@ export function GachaMachine({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, W, H)
 
-      // 机器底座
+      // 顶部旋钮
       ctx.save()
-      ctx.fillStyle = '#f2705f'
       ctx.beginPath()
-      ctx.roundRect(12, 552, 436, 112, 30)
+      ctx.roundRect(CX - 21, 0, 42, 24, 10)
+      ctx.fillStyle = '#fff6ea'
       ctx.fill()
       ctx.strokeStyle = '#2f2a25'
       ctx.lineWidth = 4
       ctx.stroke()
+      ctx.restore()
+
+      // 机器底座
+      ctx.save()
+      ctx.beginPath()
+      ctx.roundRect(30, 330, 340, 132, 30)
+      ctx.fillStyle = '#f2705f'
+      ctx.fill()
+      ctx.strokeStyle = '#2f2a25'
+      ctx.lineWidth = 4
+      ctx.stroke()
+
       ctx.fillStyle = 'rgba(47, 42, 37, 0.82)'
       ctx.beginPath()
-      ctx.roundRect(132, 596, 196, 34, 17)
+      ctx.roundRect(CX - 92, 386, 184, 36, 18)
       ctx.fill()
       ctx.fillStyle = 'rgba(255, 255, 255, 0.28)'
       ctx.beginPath()
-      ctx.roundRect(142, 602, 176, 8, 4)
+      ctx.roundRect(CX - 82, 393, 164, 8, 4)
       ctx.fill()
+
       ctx.beginPath()
-      ctx.arc(388, 612, 24, 0, Math.PI * 2)
+      ctx.arc(318, 407, 22, 0, Math.PI * 2)
       ctx.fillStyle = '#fff6ea'
       ctx.fill()
       ctx.strokeStyle = '#2f2a25'
       ctx.lineWidth = 3.5
       ctx.stroke()
       ctx.beginPath()
-      ctx.moveTo(388, 600)
-      ctx.lineTo(388, 624)
+      ctx.moveTo(318, 396)
+      ctx.lineTo(318, 418)
       ctx.stroke()
+
       ctx.fillStyle = 'rgba(255, 250, 242, 0.9)'
-      ctx.font = '700 10px ui-sans-serif, system-ui, sans-serif'
+      ctx.font = '700 9px ui-sans-serif, system-ui, sans-serif'
       ctx.textAlign = 'left'
       ctx.textBaseline = 'middle'
-      ctx.fillText('E M O T I O N   C A P S U L E', 30, 580)
+      ctx.fillText('E M O T I O N   C A P S U L E', 50, 356)
       ctx.restore()
 
-      // 玻璃罩
+      // 圆形玻璃罩
       ctx.save()
-      domePath(ctx)
-      const glass = ctx.createLinearGradient(0, DOME.y, 0, DOME.y + DOME.h)
+      ctx.beginPath()
+      ctx.arc(CX, CY, R, 0, Math.PI * 2)
+      const glass = ctx.createLinearGradient(0, CY - R, 0, CY + R)
       glass.addColorStop(0, 'rgba(255, 255, 255, 0.92)')
       glass.addColorStop(0.55, 'rgba(249, 244, 235, 0.72)')
       glass.addColorStop(1, 'rgba(240, 232, 219, 0.9)')
@@ -221,7 +235,7 @@ export function GachaMachine({
       ctx.fill()
       ctx.clip()
 
-      const inner = ctx.createRadialGradient(W / 2, DOME.y + 240, 40, W / 2, DOME.y + 240, 340)
+      const inner = ctx.createRadialGradient(CX, CY - 30, 30, CX, CY - 30, R * 1.5)
       inner.addColorStop(0, 'rgba(255, 255, 255, 0.35)')
       inner.addColorStop(1, 'rgba(120, 100, 80, 0.08)')
       ctx.fillStyle = inner
@@ -236,9 +250,9 @@ export function GachaMachine({
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.font = '600 20px ui-sans-serif, system-ui, "PingFang SC", sans-serif'
-        ctx.fillText('还没有扭蛋', W / 2, 280)
+        ctx.fillText('还没有扭蛋', CX, CY - 16)
         ctx.font = '400 14px ui-sans-serif, system-ui, "PingFang SC", sans-serif'
-        ctx.fillText('拖动色块投进来试试', W / 2, 310)
+        ctx.fillText('拖动色块投进来试试', CX, CY + 16)
       }
       ctx.restore()
 
@@ -249,32 +263,20 @@ export function GachaMachine({
       ctx.lineWidth = 7
       ctx.lineCap = 'round'
       ctx.beginPath()
-      ctx.moveTo(66, 140)
-      ctx.quadraticCurveTo(56, 300, 76, 470)
+      ctx.arc(CX, CY, R - 22, Math.PI * 0.78, Math.PI * 1.22)
       ctx.stroke()
       ctx.globalAlpha = 0.22
       ctx.lineWidth = 14
       ctx.beginPath()
-      ctx.moveTo(404, 170)
-      ctx.quadraticCurveTo(416, 320, 400, 460)
+      ctx.arc(CX, CY, R - 26, -Math.PI * 0.28, Math.PI * 0.22)
       ctx.stroke()
       ctx.restore()
 
-      ctx.save()
-      domePath(ctx)
-      ctx.strokeStyle = '#2f2a25'
-      ctx.lineWidth = 5
-      ctx.stroke()
-      ctx.restore()
-
-      // 顶部旋钮
       ctx.save()
       ctx.beginPath()
-      ctx.roundRect(W / 2 - 20, 2, 40, 22, 9)
-      ctx.fillStyle = '#fff6ea'
-      ctx.fill()
+      ctx.arc(CX, CY, R, 0, Math.PI * 2)
       ctx.strokeStyle = '#2f2a25'
-      ctx.lineWidth = 4
+      ctx.lineWidth = 5
       ctx.stroke()
       ctx.restore()
     }
@@ -322,8 +324,8 @@ export function GachaMachine({
         continue
       }
 
-      const x = 66 + ((ball.id * 53) % 328) + (Math.random() - 0.5) * 14
-      const body = Matter.Bodies.circle(x, 72, RADIUS, {
+      const x = CX - 105 + ((ball.id * 53) % 210) + (Math.random() - 0.5) * 14
+      const body = Matter.Bodies.circle(x, 100, RADIUS, {
         restitution: 0.32,
         friction: 0.04,
         frictionAir: 0.014,
