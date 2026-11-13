@@ -1,0 +1,28 @@
+services:
+  app:
+    build: .
+    container_name: emotion-calendar
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      DB_PATH: /app/server/data/emotion.db
+      JWT_SECRET_FILE: /app/server/data/jwt-secret.txt
+      # 配好 HTTPS 后改成 "1"，让登录 Cookie 只走 HTTPS
+      COOKIE_SECURE: "0"
+      # 也可以显式指定一个固定的 JWT 密钥（不设则自动生成并保存在 data 目录）
+      # JWT_SECRET: "换成一段足够长的随机字符串"
+    volumes:
+      - ./data:/app/server/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
