@@ -40,7 +40,7 @@ export function LoginPage() {
             <br />
             投进扭蛋机。
           </h1>
-          <p>不急着评价一段关系。先诚实地记下每一天的颜色，再看两个人到底能不能磨合。</p>
+          <p>诚实地记下每一天的颜色，再一起读懂两人的心情。其实就够了。</p>
         </div>
 
         <div className="auth-machine" aria-hidden="true">
