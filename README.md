@@ -62,7 +62,7 @@ docker compose up -d --build
 docker compose logs -f app
 ```
 
-应用监听 `127.0.0.1:3001` 之外的所有网卡的 3001 端口，数据持久化在 `./data`。
+应用只监听本机 `127.0.0.1:3001`，对外由 Nginx 反向代理，数据持久化在 `./data`。
 
 建议前面加一层 Nginx 反向代理并启用 HTTPS：
 

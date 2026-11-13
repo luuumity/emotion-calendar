@@ -4,7 +4,7 @@ services:
     container_name: emotion-calendar
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
       PORT: "3001"
       DB_PATH: /app/server/data/emotion.db
