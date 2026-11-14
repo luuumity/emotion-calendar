@@ -60,7 +60,7 @@ export function computeCompat(mine: RecordItem[], theirs: RecordItem[]): CompatR
   let descriptor = '需要聊聊'
   if (alignment >= 85) descriptor = '同感默契'
   else if (alignment >= 70) descriptor = '渐入佳境'
-  else if (alignment >= 55) descriptor = '正在磨合'
+  else if (alignment >= 55) descriptor = '慢慢靠近'
   else if (alignment >= 40) descriptor = '温差有点大'
 
   let trend: CompatResult['trend'] = null

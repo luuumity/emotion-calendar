@@ -175,7 +175,7 @@ export function MonthPage() {
       <section className="page-head">
         <div>
           <h1>月视图</h1>
-          <p className="sub">每个日期是当天所有扭蛋的平均色。深红是难受，深绿是舒服，中间就是磨合。</p>
+          <p className="sub">每个日期是当天所有扭蛋的平均色。深红是难受，深绿是舒服，中间是平平常常的一天。</p>
         </div>
         <div className="month-nav">
           <button type="button" className="icon-btn" onClick={() => goMonth(-1)} aria-label="上个月">
@@ -338,7 +338,7 @@ export function MonthPage() {
         <aside className="month-side">
           <section className="card compat-card">
             <div className="card-head">
-              <h2>磨合速览</h2>
+              <h2>同感速览</h2>
               {comparePerson && <span className="pill">{comparePerson.displayName}</span>}
             </div>
 
