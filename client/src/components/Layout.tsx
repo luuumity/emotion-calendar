@@ -37,6 +37,9 @@ export function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/access" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             授权管理
           </NavLink>
+          <NavLink to="/settings" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+            提醒设置
+          </NavLink>
         </nav>
 
         <div className="user-area">

@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage'
 import { MonthPage } from './pages/MonthPage'
 import { DayPage } from './pages/DayPage'
 import { AccessPage } from './pages/AccessPage'
+import { SettingsPage } from './pages/SettingsPage'
 
 function Splash() {
   return (
@@ -29,6 +30,7 @@ function Shell() {
         <Route path="/" element={<MonthPage />} />
         <Route path="/day/:date" element={<DayPage />} />
         <Route path="/access" element={<AccessPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

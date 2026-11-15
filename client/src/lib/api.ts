@@ -1,4 +1,4 @@
-export type User = { id: number; username: string; displayName: string }
+export type User = { id: number; username: string; displayName: string; reminderEnabled: boolean; reminderTime: string }
 
 export type RecordItem = {
   id: number
@@ -102,5 +102,28 @@ export const api = {
   personRecords: (ownerId: number, from: string, to: string) =>
     request<{ owner: { id: number; displayName: string }; scope: 'colors' | 'full'; records: RecordItem[] }>(
       `/access/people/${ownerId}/records?from=${from}&to=${to}`
-    )
+    ),
+
+  pushKey: () => request<{ publicKey: string }>('/push/key'),
+  pushStatus: () =>
+    request<{
+      configured: boolean
+      subscriptions: number
+      reminderEnabled: boolean
+      reminderTime: string
+      timezone: string
+    }>('/push/status'),
+  pushSubscribe: (subscription: PushSubscriptionJSON, timezone: string) =>
+    request<{ ok: true }>('/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify({ subscription, timezone })
+    }),
+  pushUnsubscribe: (endpoint: string) =>
+    request<{ ok: true }>('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint }) }),
+  pushSettings: (enabled: boolean, time: string, timezone: string) =>
+    request<{ ok: true; enabled: boolean; time: string; timezone: string }>('/push/settings', {
+      method: 'POST',
+      body: JSON.stringify({ enabled, time, timezone })
+    }),
+  pushTest: () => request<{ ok: true; sent: number }>('/push/test', { method: 'POST' })
 }

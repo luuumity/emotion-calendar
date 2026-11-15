@@ -2190,7 +2190,15 @@ p {
 }
 
 @media (max-width: 520px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
   .main-nav {
+    order: 3;
+    width: 100%;
+    justify-content: center;
     gap: 0;
   }
 
@@ -2299,5 +2307,66 @@ p {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* 提醒设置 */
+.settings-page {
+  max-width: 720px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.settings-note {
+  margin: 0 0 14px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: var(--sage-soft);
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.settings-time {
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-ok {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--sage);
+}
+
+@media (max-width: 520px) {
+  .settings-row {
+    align-items: flex-start;
   }
 }

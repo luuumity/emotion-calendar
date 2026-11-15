@@ -95,6 +95,31 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_grants_viewer ON grants(viewer_id);
       `)
     }
+  },
+  {
+    version: 2,
+    // 提醒功能：用户级配置 + 设备订阅
+    up() {
+      db.exec(`
+        ALTER TABLE users ADD COLUMN reminder_enabled INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE users ADD COLUMN reminder_time TEXT NOT NULL DEFAULT '21:00';
+        ALTER TABLE users ADD COLUMN timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai';
+        ALTER TABLE users ADD COLUMN last_reminded_on TEXT NOT NULL DEFAULT '';
+
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          endpoint TEXT NOT NULL UNIQUE,
+          p256dh TEXT NOT NULL,
+          auth TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          last_ok_at TEXT,
+          fail_count INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
+      `)
+    }
   }
 ]
 

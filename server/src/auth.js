@@ -38,7 +38,13 @@ export function clearSessionCookie(res) {
 }
 
 export function publicUser(user) {
-  return { id: user.id, username: user.username, displayName: user.display_name }
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.display_name,
+    reminderEnabled: !!user.reminder_enabled,
+    reminderTime: user.reminder_time || '21:00'
+  }
 }
 
 export function attachUser(req, _res, next) {
