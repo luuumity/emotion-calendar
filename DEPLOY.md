@@ -247,6 +247,26 @@ systemctl restart emotion-calendar
 curl -s http://127.0.0.1:3100/api/health
 ```
 
+### 数据库迁移
+
+表结构变更不靠手工执行 SQL，服务启动时会自动检查并执行迁移（[server/src/db.js](../server/src/db.js)）：
+
+- 版本号存在 SQLite 的 `PRAGMA user_version` 里
+- `migrations` 数组按版本递增排列，启动时只执行比当前版本高的那些，整体包在一个事务里
+- 已有数据的库在迁移前会自动快照到 `backups/pre-migrate-v<目标版本>-<时间>.db`（`VACUUM INTO`，不会阻塞在线读写）
+- 全新库没有可丢的数据，跳过备份
+
+加一个新字段的步骤：
+
+1. 在 `migrations` 末尾追加 `{ version: N, up() { ... } }`，**不要修改已发布的旧迁移**
+2. 用 `ALTER TABLE ... ADD COLUMN ... DEFAULT <常量>`，SQLite 会原地加列，不影响存量行
+3. 部署重启后看日志里是否出现 `[db] 数据库已迁移: v1 -> v2`
+
+注意两点：
+
+- `CREATE TABLE IF NOT EXISTS` 对**已存在的库不起作用**，给老表加字段必须写 `ALTER TABLE`，否则老库会报 `no such column`
+- 回滚方式：停服务 → 把 `data/emotion.db` 换成 `backups/pre-migrate-vN-*.db` → 启服务。版本号存在数据库文件里，会跟着一起回退
+
 ## 11. 备份与恢复
 
 依赖：`apt-get install -y sqlite3`（gzip/tar 系统自带）。
