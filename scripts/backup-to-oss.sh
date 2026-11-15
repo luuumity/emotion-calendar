@@ -17,19 +17,20 @@ ENCRYPT="${BACKUP_ENCRYPT:-0}"
 TS="$(date +%F-%H%M)"
 # 把数据库 schema 版本写进文件名，OSS 控制台列表里即可辨认，无需下载
 SCHEMA="$(sqlite3 "$DB_PATH" 'PRAGMA user_version;')"
+BASE="emotion-${TS}-v${SCHEMA}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-sqlite3 "$DB_PATH" ".backup '${TMP}/emotion-${TS}.db'"
-gzip -9 "${TMP}/emotion-${TS}.db"
+sqlite3 "$DB_PATH" ".backup '${TMP}/${BASE}.db'"
+gzip -9 "${TMP}/${BASE}.db"
 
 if [ "$ENCRYPT" = "1" ]; then
-  NAME="emotion-${TS}-v${SCHEMA}.db.gz.gpg"
+  NAME="${BASE}.db.gz.gpg"
   gpg --batch --yes --symmetric --cipher-algo AES256 \
     --passphrase-file /etc/emotion-backup/gpg-passphrase \
-    -o "${TMP}/${NAME}" "${TMP}/emotion-${TS}.db.gz"
+    -o "${TMP}/${NAME}" "${TMP}/${BASE}.db.gz"
 else
-  NAME="emotion-${TS}-v${SCHEMA}.db.gz"
+  NAME="${BASE}.db.gz"
 fi
 
 "$OSSUTIL" -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" \
