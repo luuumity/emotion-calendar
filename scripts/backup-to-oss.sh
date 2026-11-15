@@ -15,6 +15,8 @@ source "$OSS_ENV_FILE"
 
 ENCRYPT="${BACKUP_ENCRYPT:-0}"
 TS="$(date +%F-%H%M)"
+# 把数据库 schema 版本写进文件名，OSS 控制台列表里即可辨认，无需下载
+SCHEMA="$(sqlite3 "$DB_PATH" 'PRAGMA user_version;')"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -22,15 +24,15 @@ sqlite3 "$DB_PATH" ".backup '${TMP}/emotion-${TS}.db'"
 gzip -9 "${TMP}/emotion-${TS}.db"
 
 if [ "$ENCRYPT" = "1" ]; then
-  NAME="emotion-${TS}.db.gz.gpg"
+  NAME="emotion-${TS}-v${SCHEMA}.db.gz.gpg"
   gpg --batch --yes --symmetric --cipher-algo AES256 \
     --passphrase-file /etc/emotion-backup/gpg-passphrase \
     -o "${TMP}/${NAME}" "${TMP}/emotion-${TS}.db.gz"
 else
-  NAME="emotion-${TS}.db.gz"
+  NAME="emotion-${TS}-v${SCHEMA}.db.gz"
 fi
 
 "$OSSUTIL" -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" \
   cp -f "${TMP}/${NAME}" "oss://${OSS_BUCKET}/backups/${NAME}" >/dev/null
 
-echo "UPLOADED: backups/${NAME} ($(stat -c%s "${TMP}/${NAME}") bytes, encrypt=${ENCRYPT})"
+echo "UPLOADED: backups/${NAME} ($(stat -c%s "${TMP}/${NAME}") bytes, schema=v${SCHEMA}, encrypt=${ENCRYPT})"

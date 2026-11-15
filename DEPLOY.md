@@ -281,20 +281,23 @@ ROOT=/opt/emotion-calendar
 DATA="$ROOT/data"
 DEST="$ROOT/backups"
 STAMP=$(date +%F-%H%M)
+# schema 版本写进文件名，恢复前不用下载就能确认版本
+SCHEMA=$(sqlite3 "$DATA/emotion.db" 'PRAGMA user_version;')
+DB="emotion-$STAMP-v$SCHEMA"
 mkdir -p "$DEST"
 
 # 在线备份，不锁库，WAL 里的内容也会包含进来
-sqlite3 "$DATA/emotion.db" ".backup '$DEST/emotion-$STAMP.db'"
-gzip -f "$DEST/emotion-$STAMP.db"
+sqlite3 "$DATA/emotion.db" ".backup '$DEST/$DB.db'"
+gzip -f "$DEST/$DB.db"
 
 # 配置与会话密钥一起打包，恢复时不用重新发证书或强制所有人重新登录
 tar -czf "$DEST/config-$STAMP.tar.gz" -C "$ROOT" .env.production data/jwt-secret.txt
-chmod 600 "$DEST/emotion-$STAMP.db.gz" "$DEST/config-$STAMP.tar.gz"
+chmod 600 "$DEST/$DB.db.gz" "$DEST/config-$STAMP.tar.gz"
 
 find "$DEST" -name "emotion-*.db.gz" -mtime +14 -delete
 find "$DEST" -name "config-*.tar.gz" -mtime +14 -delete
 
-echo "$(date "+%F %T") backup done: emotion-$STAMP.db.gz"
+echo "$(date "+%F %T") backup done: $DB.db.gz"
 ```
 
 root 的 crontab（每天 03:10，已配置）：
@@ -303,17 +306,19 @@ root 的 crontab（每天 03:10，已配置）：
 10 3 * * * /usr/local/bin/emotion-backup.sh >> /var/log/emotion-backup.log 2>&1
 ```
 
-从本地备份恢复（把文件名换成要恢复的备份）：
+从本地备份恢复（`v1` 是 schema 版本，数字随表结构升级而变化）：
 
 ```bash
 cd /opt/emotion-calendar/backups
-gunzip -k emotion-2026-11-13-1216.db.gz   # -k 保留原压缩包
+gunzip -k emotion-2026-11-15-0340-v1.db.gz   # -k 保留原压缩包
 systemctl stop emotion-calendar
-cp emotion-2026-11-13-1216.db /opt/emotion-calendar/data/emotion.db
+cp emotion-2026-11-15-0340-v1.db /opt/emotion-calendar/data/emotion.db
 # 可选：同时恢复配置与会话密钥（避免所有人重新登录）
-tar -xzf config-2026-11-13-1216.tar.gz -C /opt/emotion-calendar
+tar -xzf config-2026-11-15-0340.tar.gz -C /opt/emotion-calendar
 systemctl start emotion-calendar
 ```
+
+> 备份的版本号低于当前代码时不用手工处理：启动时迁移会自动把数据升级到最新版本。
 
 以上是**服务器本地备份**（保留 14 天）。异地容灾另有**每日上传阿里云 OSS**（云端永久归档，可选加密，脚本 `scripts/backup-to-oss.sh`），配置手册见 [OSS-SETUP.md](./OSS-SETUP.md)。
 
@@ -323,12 +328,12 @@ OSS 备份的每日 cron（root，与本地备份错开，已配置）：
 40 3 * * * /opt/emotion-calendar/scripts/backup-to-oss.sh >> /var/log/emotion-oss-backup.log 2>&1
 ```
 
-从 OSS 恢复（把文件名换成要恢复的备份）：
+从 OSS 恢复（文件名格式 `emotion-<日期>-<时分>-v<schema版本>.db.gz`，旧版本备份可自动升级）：
 
 ```bash
 source /etc/emotion-backup/oss.env
 ossutil64 -e "$OSS_ENDPOINT" -i "$OSS_ACCESS_KEY_ID" -k "$OSS_ACCESS_KEY_SECRET" \
-  cp -f "oss://${OSS_BUCKET}/backups/emotion-YYYY-MM-DD-HHMM.db.gz" /tmp/restore.db.gz
+  cp -f "oss://${OSS_BUCKET}/backups/emotion-2026-11-15-0340-v1.db.gz" /tmp/restore.db.gz
 gunzip -f /tmp/restore.db.gz
 sqlite3 /tmp/restore.db "PRAGMA integrity_check;"   # 应输出 ok
 systemctl stop emotion-calendar
