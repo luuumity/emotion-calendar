@@ -344,7 +344,52 @@ systemctl start emotion-calendar
 > 若备份是加密版（`.gpg`），先解密再解压：`gpg --batch --passphrase-file /etc/emotion-backup/gpg-passphrase -o /tmp/restore.db.gz -d /tmp/restore.db.gz.gpg`。
 > **换新服务器时**：除按本手册重建外，还需把 RAM 策略里的 `acs:SourceIp` 改成新服务器 IP，否则 OSS 上传会被拒绝。
 
-## 12. 常见问题
+## 12. 每日提醒（Web Push）
+
+服务器每分钟检查一次：到了用户设定的时间，如果当天还没有记录，就给该用户的所有已订阅设备发一条通知。
+
+所需环境变量（已写入 `.env.production`，权限 600）：
+
+```bash
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:admin@emotion.cinnamon.xin
+```
+
+缺失时服务照常启动，只是 `/api/push/*` 返回 503、调度器不启用。重新生成一对密钥：
+
+```bash
+node -e "const c=require('crypto');const e=c.createECDH('prime256v1');e.generateKeys();console.log('VAPID_PUBLIC_KEY='+e.getPublicKey().toString('base64url'));console.log('VAPID_PRIVATE_KEY='+e.getPrivateKey().toString('base64url'))" >> .env.production
+```
+
+更换密钥后，所有旧订阅都会失效（需用户重新开启），所以除非泄露不要随意更换。
+
+手工验证送达（登录后拿到 Cookie 再调用）：
+
+```bash
+curl -s -b cookie.txt -X POST http://127.0.0.1:3100/api/push/test
+```
+
+端点与行为：
+
+| 接口 | 说明 |
+|------|------|
+| `GET /api/push/key` | 下发 VAPID 公钥，前端订阅时用 |
+| `GET /api/push/status` | 当前开关、时间、时区、本账号订阅数 |
+| `POST /api/push/subscribe` | 保存设备订阅（按 endpoint 去重），顺带记录时区 |
+| `POST /api/push/unsubscribe` | 删除指定设备的订阅 |
+| `POST /api/push/settings` | 开关与提醒时间（`HH:mm` 校验） |
+| `POST /api/push/test` | 立即给该账号所有设备发一条测试通知 |
+
+排错要点：
+
+- **iOS 必须从主屏幕图标打开**才有推送能力，Safari 标签页里订阅会失败
+- 时区取浏览器上报的 IANA 名称（如 `Asia/Shanghai`），"今天"按该时区判断
+- 推送返回 404/410 表示凭证已被系统撤销，服务端会自动删除该订阅；用户下次打开 App 会静默重新订阅
+- 同一天只提醒一次（`users.last_reminded_on` 去重），改时间不会重发
+- 国内 Android 无 GMS，Web Push 基本不可用，页面会提示不支持
+
+## 13. 常见问题
 
 | 现象 | 排查 |
 | --- | --- |
@@ -356,7 +401,7 @@ systemctl start emotion-calendar
 | 想看接口日志 | `journalctl -u emotion-calendar -f` |
 | 数据库锁住 | 确认只有一个服务实例在跑：`ps aux \| grep 'server/src/index.js'` |
 
-## 13. 回滚
+## 14. 回滚
 
 ```bash
 cd /opt/emotion-calendar
