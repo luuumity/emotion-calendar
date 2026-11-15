@@ -164,6 +164,12 @@ server {
     listen [::]:80;
     server_name emotion.cinnamon.xin;
 
+    # gzip 默认只压 text/html，必须显式列出 JS/CSS，否则 300KB 的 JS 会原样传输
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+    gzip_vary on;
+
     location / {
         proxy_pass http://127.0.0.1:3100;
         proxy_http_version 1.1;
@@ -195,7 +201,18 @@ apt-get install -y certbot python3-certbot-nginx   # 已安装可跳过
 certbot --nginx -d emotion.cinnamon.xin --redirect --keep-until-expiring
 ```
 
-certbot 只会改动 `emotion.cinnamon.xin` 这个 server 块，不会影响 homecare。完成后确认自动续期：
+certbot 只会改动 `emotion.cinnamon.xin` 这个 server 块，不会影响 homecare。签发完成后，把 certbot 写入的两行监听改成 HTTP/2：
+
+```nginx
+listen [::]:443 ssl http2 ipv6only=on;
+listen 443 ssl http2;
+```
+
+改完 `nginx -t && systemctl reload nginx`，用 `curl -sI --http2 https://emotion.cinnamon.xin | head -1` 应看到 `HTTP/2 200`。
+
+> 备份 nginx 配置时不要放在 `sites-enabled/` 里（该目录是通配加载，`.bak` 文件会被一起读入并报 `duplicate listen`），放到 `/etc/nginx/conf-backups/` 之类的目录。
+
+完成后确认自动续期：
 
 ```bash
 systemctl status certbot.timer --no-pager
