@@ -556,11 +556,16 @@ p {
 
 .calendar-top {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-bottom: 12px;
-  flex-wrap: wrap;
+}
+
+/* 图例单独一行靠右，避免占位挤压星期表头导致与日历列错位 */
+.calendar-top .score-legend.compact {
+  order: -1;
+  align-self: flex-end;
 }
 
 .weekdays {
