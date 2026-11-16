@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { Layout } from './components/Layout'
+import { ScrollManager } from './components/ScrollManager'
 import { LoginPage } from './pages/LoginPage'
 import { MonthPage } from './pages/MonthPage'
 import { DayPage } from './pages/DayPage'
@@ -40,6 +41,7 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
+      <ScrollManager />
       <AuthProvider>
         <Shell />
       </AuthProvider>
