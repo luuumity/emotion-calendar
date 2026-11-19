@@ -8,7 +8,7 @@ router.use(requireUser)
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 const NOTE_LIMIT = 2000
 
-const SELECT_FIELDS = 'id, day, score, note, created_at, updated_at'
+const SELECT_FIELDS = 'id, day, score, note, created_at, updated_at, original_score, adjusted_at'
 const selectOne = db.prepare(`SELECT ${SELECT_FIELDS} FROM records WHERE id = ? AND user_id = ?`)
 
 function toDate(day) {
@@ -30,6 +30,8 @@ function view(row) {
     day: row.day,
     score: row.score,
     note: row.note,
+    originalScore: row.original_score,
+    adjustedAt: row.adjusted_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   }
@@ -71,20 +73,46 @@ router.put('/:id', (req, res) => {
   const existing = selectOne.get(id, req.user.id)
   if (!existing) return res.status(404).json({ error: '没有找到这颗扭蛋' })
 
-  if (req.body?.score !== undefined) {
-    return res.status(400).json({ error: '颜色和分值创建后不可修改，请删除这颗后重新投' })
+  const hasScore = req.body?.score !== undefined
+  const hasNote = req.body?.note !== undefined
+  if (!hasScore && !hasNote) return res.status(400).json({ error: '没有需要更新的内容' })
+
+  let score = existing.score
+  let note = existing.note
+  let originalScore = existing.original_score
+  let adjustedAt = existing.adjusted_at
+  let updatedAt = existing.updated_at
+  let changed = false
+  const now = new Date().toISOString()
+
+  if (hasScore) {
+    const nextScore = toScore(req.body.score)
+    if (nextScore === null) return res.status(400).json({ error: '感受值需为 0-100 的整数' })
+    if (nextScore !== existing.score) {
+      // original_score 只在第一次调整时落库，后续调整只更新时间
+      originalScore = existing.original_score ?? existing.score
+      score = nextScore
+      adjustedAt = now
+      updatedAt = now
+      changed = true
+    }
   }
-  if (req.body?.note === undefined) return res.status(400).json({ error: '没有需要更新的内容' })
 
-  const note = toNote(req.body.note)
-  if (note === null) return res.status(400).json({ error: '理由需为文本' })
+  if (hasNote) {
+    const nextNote = toNote(req.body.note)
+    if (nextNote === null) return res.status(400).json({ error: '理由需为文本' })
+    if (nextNote !== existing.note) {
+      note = nextNote
+      updatedAt = now
+      changed = true
+    }
+  }
 
-  db.prepare('UPDATE records SET note = ?, updated_at = ? WHERE id = ? AND user_id = ?').run(
-    note,
-    new Date().toISOString(),
-    id,
-    req.user.id
-  )
+  if (changed) {
+    db.prepare(
+      'UPDATE records SET score = ?, note = ?, original_score = ?, adjusted_at = ?, updated_at = ? WHERE id = ? AND user_id = ?'
+    ).run(score, note, originalScore, adjustedAt, updatedAt, id, req.user.id)
+  }
 
   res.json({ record: view(selectOne.get(id, req.user.id)) })
 })

@@ -120,6 +120,16 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
       `)
     }
+  },
+  {
+    version: 3,
+    // 允许事后微调分值：记录首次调整前的原始分与最近一次调整时间
+    up() {
+      db.exec(`
+        ALTER TABLE records ADD COLUMN original_score INTEGER;
+        ALTER TABLE records ADD COLUMN adjusted_at TEXT;
+      `)
+    }
   }
 ]
 
