@@ -77,7 +77,7 @@
 
 #### 2.5 存储与接口
 
-- [ ] 新表 `insights`：scope（single/couple/linked）、user_id/couple_id、period_type（day/week）、period_start、content、model、tokens、created_at
+- [ ] 新表 `insights`：scope（single/couple/linked）、user_id/couple_id、period_type（day/week）、period_start、content、model、tokens、sources（联网引用 JSON）、created_at
 - [ ] 新表/字段存放记忆摘要，与用户绑定
 - [ ] 查询接口：按周期读取，做权限校验；双人结果仅授权双方可见
 - [ ] 结果缓存与去重；重复请求不重复调用模型
@@ -100,12 +100,41 @@
 
 #### 2.8 待定
 
-- [ ] 模型供应商与部署方式（云 API / 自建）
+- [ ] 模型供应商与部署方式：倾向 DeepSeek（云 API，详见 2.9），需最终确认
 - [ ] 单人记忆保留多久、是否跨月
 - [ ] 双人分析是否需要双方各自确认后才可见
 - [ ] 是否允许用户手动触发一次分析
 - [ ] 个人联动报告的生成频率（随双人报告 / 每日 / 手动）
 - [ ] 双人报告是否明示“部分理由未公开”
+
+#### 2.9 联网检索与模型选型（2026-11-19 调研）
+
+DeepSeek API 现有三条联网路径：
+
+| 方式 | 模型 | 触发方 | 计费 |
+|------|------|--------|------|
+| 联网工具 `deepseek_web_search` / `deepseek_read_url` | deepseek-flash | 模型自判 | 2026-11-18 12:00 起工具调用免费，结果按 token 计 |
+| Responses API 的 `web_search` | 仅 deepseek-v4-pro（flash 忽略） | 模型自判 | 同上 |
+| 独立 Search / Fetch API | 任意 | 我们代码控制 | 按次 ¥5 / 1000 次 |
+
+模型价：flash 输入（缓存未命中）¥2/M、输出 ¥8/M；v4-pro ¥9/M、¥27/M。周一至周五 9–12、14–18 为高峰，其余（含周末与法定节假日全天）为空闲半价——分析任务放深夜跑即享空闲价。
+
+**结论与约束**
+
+- [ ] 模型选 `deepseek-flash`：官方建议联网工具配 flash，且价格最低
+- [ ] 联网默认关闭，作为 AI 设置中的可选项（如「允许联网查证梗与节目」），由用户自行打开
+- [ ] 开启时用非思考模式，避免「深度思考搜索」最多约 20 次工具调用的开销
+- [ ] 提示词禁止搜索个人信息：真实姓名、公司、地址、账号等一律不得进入检索词
+- [ ] 提示词约束：只使用与情绪背景直接相关的检索结果，查不到就明说「不确定」，不强行关联
+- [ ] 结果落库带 sources（引用 URL + 标题 + 生成时间），前端以小角标展示依据
+- [ ] 承认不可复现：同一批历史在不同时间重跑，检索结果与结论可能漂移；已落库的 insights 以当时 sources 为准
+- [ ] 成本不构成瓶颈（周分析数万 token，空闲价约几分钱），真正的成本是隐私边界与一致性
+
+参考文档：
+- [联网工具](https://api-docs.deepseek.com/zh-cn/guides/web_tools)
+- [使用 Responses API](https://api-docs.deepseek.com/zh-cn/guides/responses_api/)
+- [网页搜索与抓取](https://api-docs.deepseek.com/zh-cn/guides/search/)
+- [模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 ### 3. 私密记录标签（配合双人分析）
 
