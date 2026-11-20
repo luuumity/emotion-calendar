@@ -4,10 +4,12 @@
 
 ## 当前实现状态（2026-11-20 核对）
 
-代码、GitHub `main`、服务器三者一致（`4c1b69b`），服务 `active`。
+代码、GitHub `main`、服务器三者一致（`974e8cd`），服务 `active`。
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
+| 数据库迁移 v6 | 已完成 | 新增 `chat_sessions.summary` / `summary_until_id` |
+| 会话压缩摘要 | 已完成 | 超过 12 条未压缩消息时压成滚动摘要，保留最近 6 条；失败降级为截断 |
 | 数据库迁移 v5 | 已完成 | facts / record_tags / insights / couple_memory / chat_sessions / chat_messages |
 | 分值微调（后端） | 已完成 | `PUT /api/records/:id` 接受 score；original_score / adjusted_at |
 | 分值微调（前端） | 已完成 | 滑杆 + −/+，「已调过」标记；**无 5 秒撤销** |
@@ -606,12 +608,14 @@ propose_report({ start, end })
 
 **分期**
 
-- [ ] P0：改 messages 结构（历史出 system、真实 role、稳定前缀）
+- [x] P0：改 messages 结构（历史出 system、真实 role、稳定前缀）—— `46610c6`
+- [x] P2a：会话压缩摘要（v6 迁移、滚动摘要、失败降级）—— `974e8cd`，实测通过
 - [ ] P1：主动读工具 + 工具循环 + 上限
-- [ ] P2：压缩摘要 + `couple_memory` 真摘要
+- [ ] P2b：`couple_memory` 真摘要（现在是截取报告开头）
 - [ ] P3：写协议（proposal 工具 + 确认接口 + 三类落库）
 - [ ] P4：流式输出 + run 生命周期（断线补全）
-- [ ] 前置实测：服务端工具与客户端 function tools 共存；流式下的 tool_calls 拼接
+- [x] 前置实测：服务端工具与客户端 function tools 共存（可用）；`deepseek_read_url` 对 B 站可用、对小红书被拦
+- [ ] 前置实测：流式下的 `tool_calls` 分片拼接（等 P4）
 
 ### 3. 私密记录标签（配合双人分析）
 
