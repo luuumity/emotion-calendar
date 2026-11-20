@@ -138,7 +138,8 @@ export function ChatPage() {
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // 移动端中文拼音输入法按回车选字时，会在 composing 阶段发 Enter；跳过它
+    if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent as unknown as { isComposing?: boolean }).isComposing) {
       e.preventDefault()
       send()
     }
@@ -248,7 +249,7 @@ export function ChatPage() {
                 <textarea
                   className="chat-input"
                   rows={1}
-                  placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"
+                  placeholder="说点什么…"
                   value={input}
                   disabled={sending}
                   onChange={(e) => setInput(e.target.value)}

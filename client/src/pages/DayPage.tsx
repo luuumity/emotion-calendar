@@ -628,39 +628,6 @@ export function DayPage() {
                   </div>
                 )}
 
-                {/* AI 标签（只在看自己的记录时展示，标签是私有的） */}
-                {asId == null && (
-                <div className="tags-block">
-                  <div className="tags-head">
-                    <span>AI 洞察</span>
-                    {tagsLoading && <span className="tags-loading">加载中…</span>}
-                  </div>
-                  {!tagsLoading && tags.length === 0 && (
-                    <p className="tags-empty">还没有标签。生成单人报告或让 Agent 分析后，这里会出现相关的洞察、建议和模式。</p>
-                  )}
-                  {!tagsLoading && tags.length > 0 && (
-                    <div className="tags-list">
-                      {tags.map((t) => (
-                        <div key={t.id} className={'tag-pill tag-' + t.tagType}>
-                          <span className="tag-pill-label">{labelForTag(t.tagType)}</span>
-                          <span className="tag-pill-content">{t.content}</span>
-                          {canEdit && t.source === 'agent' && (
-                            <button
-                              type="button"
-                              className="tag-pill-remove"
-                              onClick={() => removeTag(t.id)}
-                              title="删除这条标签"
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                )}
-
                 <div className="note-block">
                   <div className="note-head">
                     <span>这一颗的理由</span>
@@ -704,6 +671,39 @@ export function DayPage() {
                     <div className="note-readonly">{selected.note?.trim() ? selected.note : '这一颗 TA 没有写下理由。'}</div>
                   )}
                 </div>
+
+                {/* AI 标签（只在看自己的记录时展示，标签是私有的） */}
+                {asId == null && (
+                <div className="tags-block">
+                  <div className="tags-head">
+                    <span>AI 洞察</span>
+                    {tagsLoading && <span className="tags-loading">加载中…</span>}
+                  </div>
+                  {!tagsLoading && tags.length === 0 && (
+                    <p className="tags-empty">还没有标签。生成单人报告或让 Agent 分析后，这里会出现相关的洞察、建议和模式。</p>
+                  )}
+                  {!tagsLoading && tags.length > 0 && (
+                    <div className="tags-list">
+                      {tags.map((t) => (
+                        <div key={t.id} className={'tag-pill tag-' + t.tagType}>
+                          <span className="tag-pill-label">{labelForTag(t.tagType)}</span>
+                          <span className="tag-pill-content">{t.content}</span>
+                          {canEdit && t.source === 'agent' && (
+                            <button
+                              type="button"
+                              className="tag-pill-remove"
+                              onClick={() => removeTag(t.id)}
+                              title="删除这条标签"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                )}
 
                 {editable && (
                   <div className="record-actions">
