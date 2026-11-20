@@ -1,18 +1,46 @@
-// 日常问答 prompt 模板
-// 输入：persona 序列化结果 + 用户本轮消息 + 可选的引用（报告 ID / 记录 ID）
+// 日常问答 prompt 模板（P0）
+// 结构：稳定人格/规则 → facts → 记忆块 → 真实历史 → 本轮消息
+// 只有最后一条每轮必变，其余按变化频率从低到高排列，便于命中前缀缓存。
 
-export function buildChatMessages({ personaBlock, userMessage, refs = [] }) {
-  const system = `${personaBlock}
+export function buildChatMessages({
+  personaPrompt,
+  displayName,
+  factsBlock = '',
+  memoryBlock = '',
+  history = [],
+  userMessage,
+  refs = []
+}) {
+  const messages = []
 
-===== 任务 =====
-以 ${refs.length ? '引用的报告和记录' : '你关于 ' + (personaBlock.match(/===== (.+) 的 Persona/)?.[1] || '用户') + ' 的已有了解'} 为基础，温和、有洞察力地回应用户。
-如果用户的问题涉及双人关系，请明确区分"你观察到的 ${personaBlock.match(/===== (.+) 的 Persona/)?.[1] || '用户'} 的视角"和"你不知道对方的内心想法"——不要臆测对方。
+  messages.push({
+    role: 'system',
+    content: `${personaPrompt}
+
+===== 对话规则 =====
+你在和 ${displayName} 对话。
 语气：简短、温暖、像朋友一样，一次回答控制在 200 字以内。
+只依据上下文和你读到的内容回答，不要编造未出现的事实；不知道就说不知道。
+涉及双方关系时，明确区分"你观察到的"和"对方的内心想法"，不要臆测。
+你可以读取用户消息中的链接来判断其内容；读不到时如实说明。
+不要做心理诊断，也不替用户给关系下结论。`
+  })
 
-${refs.length ? '以下是用户当前对话引用的内容，请优先参考：\n' + refs.map((r) => `- ${r.type === 'insight' ? '报告' : '记录'} ${r.id}: ${r.content?.slice(0, 150) || ''}`).join('\n') : ''}`
+  if (factsBlock) messages.push({ role: 'system', content: factsBlock })
+  if (memoryBlock) messages.push({ role: 'system', content: memoryBlock })
 
-  return [
-    { role: 'system', content: system },
-    { role: 'user', content: userMessage }
-  ]
+  for (const m of history) {
+    messages.push({ role: m.role, content: m.content })
+  }
+
+  const extra = []
+  if (refs.length) {
+    extra.push(
+      '用户引用了以下内容：\n' +
+        refs.map((r) => `- ${r.type === 'insight' ? '报告' : '记录'} ${r.id}: ${r.content?.slice(0, 150) || ''}`).join('\n')
+    )
+  }
+  messages.push({ role: 'user', content: extra.length ? `${extra.join('\n\n')}\n\n${userMessage}` : userMessage })
+
+  return messages
 }

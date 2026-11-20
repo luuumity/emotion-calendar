@@ -6,7 +6,7 @@ import { Router } from 'express'
 import { db } from '../db.js'
 import { requireUser } from '../auth.js'
 import { callDeepSeek } from '../lib/llm.js'
-import { serializePersona } from '../lib/persona.js'
+import { getDefaultSystemPrompt } from '../lib/persona.js'
 import { buildChatMessages } from '../lib/prompts/chat.js'
 
 const router = Router()
@@ -112,17 +112,67 @@ router.get('/sessions/:id/messages', (req, res) => {
 
 // ======== 发送消息 + 获取 AI 回复 ========
 
-function collectPersonaForChat(userId) {
-  const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(userId)?.display_name || '用户'
-  const facts = db.prepare('SELECT * FROM facts WHERE user_id = ? ORDER BY confidence DESC, pinned DESC, id DESC').all(userId)
-  const tags = db.prepare(
-    `SELECT t.*, r.day AS record_day FROM record_tags t JOIN records r ON r.id = t.record_id
-     WHERE t.user_id = ? ORDER BY t.id DESC LIMIT 15`
-  ).all(userId)
-  const singleInsights = db
-    .prepare('SELECT period_start, period_end, content FROM insights WHERE scope = ? AND user_id = ? ORDER BY period_start DESC LIMIT 3')
-    .all('single', userId)
-  return { displayName, facts, tags, singleInsights }
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+function shiftDay(day, delta) {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + delta)
+  return d.toISOString().slice(0, 10)
+}
+
+// 记忆块：关于用户生活的跨会话知识（规则生成，不调模型）
+function buildMemoryBlock(userId) {
+  const today = shanghaiToday()
+  const from = shiftDay(today, -13)
+
+  const report = db
+    .prepare('SELECT period_start, period_end, content FROM insights WHERE scope = ? AND user_id = ? ORDER BY period_start DESC LIMIT 1')
+    .get('single', userId)
+
+  const records = db
+    .prepare('SELECT day, score, original_score, note FROM records WHERE user_id = ? AND day >= ? ORDER BY day ASC')
+    .all(userId, from)
+
+  const tagRows = db
+    .prepare(
+      `SELECT r.day, t.content FROM record_tags t JOIN records r ON r.id = t.record_id
+       WHERE t.user_id = ? AND r.day >= ? ORDER BY t.id DESC`
+    )
+    .all(userId, from)
+
+  const tagsByDay = {}
+  for (const t of tagRows) {
+    const list = tagsByDay[t.day] || (tagsByDay[t.day] = [])
+    if (list.length < 2) list.push(String(t.content || '').replace(/\s+/g, '').slice(0, 10))
+  }
+
+  const lines = ['【记忆】', `今天是 ${today}。`]
+  if (report) {
+    const text = String(report.content || '').replace(/\s+/g, ' ').slice(0, 300)
+    lines.push(`最近一份自我分析（${report.period_start} ~ ${report.period_end}）：${text}`)
+  }
+  if (records.length) {
+    lines.push('近 14 天记录（日期 分值 理由）：')
+    for (const r of records) {
+      const score = r.original_score != null ? `${r.score}（原 ${r.original_score}）` : String(r.score)
+      const note = String(r.note || '').replace(/\s+/g, ' ').slice(0, 60)
+      const tags = (tagsByDay[r.day] || []).map((t) => `#${t}`).join(' ')
+      lines.push(`${r.day.slice(5)} ${score} ${note}${tags ? ` ${tags}` : ''}`.trim())
+    }
+  } else {
+    lines.push('近 14 天没有记录。')
+  }
+  return lines.join('\n')
+}
+
+function buildFactsBlock(userId) {
+  const facts = db
+    .prepare('SELECT content FROM facts WHERE user_id = ? ORDER BY pinned DESC, id ASC LIMIT 30')
+    .all(userId)
+  if (!facts.length) return ''
+  return '【关于用户的稳定事实】\n' + facts.map((f) => `- ${f.content}`).join('\n')
 }
 
 router.post('/sessions/:id/messages', async (req, res) => {
@@ -160,25 +210,29 @@ router.post('/sessions/:id/messages', async (req, res) => {
     db.prepare('UPDATE chat_sessions SET title = ? WHERE id = ?').run(autoTitle, id)
   }
 
-  // 2. 取该 session 最近 N 轮作为历史（给模型看），但 system prompt 已覆盖 persona
+  // 2. 历史：真实 user/assistant 消息（不含本轮，最多 11 条）
   const history = db
-    .prepare('SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 20')
-    .all(id)
+    .prepare('SELECT role, content FROM chat_messages WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT 11')
+    .all(id, userInfo.lastInsertRowid)
     .reverse()
-    .filter((m) => m.role !== 'system') // system 只在调用时组装，不存
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 800) }))
 
-  // 3. 组装 persona（单人场景，全量不裁剪）
-  const { displayName, facts, tags, singleInsights } = collectPersonaForChat(req.user.id)
-  const personaBlock = serializePersona({
+  // 3. 稳定块 / 事实 / 记忆块
+  const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(req.user.id)?.display_name || '用户'
+  const factsBlock = buildFactsBlock(req.user.id)
+  const memoryBlock = buildMemoryBlock(req.user.id)
+
+  // 4. 调模型：稳定前缀 → facts → 记忆 → 历史 → 本轮
+  const messages = buildChatMessages({
+    personaPrompt: getDefaultSystemPrompt(),
     displayName,
-    facts,
-    tags,
-    recentChats: history.slice(-8), // 滑动窗口最近 8 轮
-    singleInsights
+    factsBlock,
+    memoryBlock,
+    history,
+    userMessage: content,
+    refs
   })
-
-  // 4. 调模型
-  const messages = buildChatMessages({ personaBlock, userMessage: content, refs })
 
   try {
     const result = await callDeepSeek(messages)
