@@ -130,6 +130,93 @@ const migrations = [
         ALTER TABLE records ADD COLUMN adjusted_at TEXT;
       `)
     }
+  },
+  {
+    version: 4,
+    // AI 能力全套表：持久记忆、记录标签、单人/双人报告、对谈会话
+    up() {
+      db.exec(`
+        -- Facts：关于用户自身的稳定事实，用户可控写入
+        CREATE TABLE IF NOT EXISTS facts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          content TEXT NOT NULL,
+          confidence INTEGER NOT NULL DEFAULT 3 CHECK (confidence BETWEEN 1 AND 5),
+          source TEXT NOT NULL DEFAULT 'user' CHECK (source IN ('user', 'agent_extracted', 'report_derived')),
+          source_ref_id INTEGER,
+          couple_visible INTEGER NOT NULL DEFAULT 0,
+          pinned INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id);
+
+        -- AI 标签：附着在具体记录上的对话洞察
+        CREATE TABLE IF NOT EXISTS record_tags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          record_id INTEGER NOT NULL REFERENCES records(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          tag_type TEXT NOT NULL CHECK (tag_type IN ('insight', 'suggestion', 'pattern', 'correction')),
+          content TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'agent' CHECK (source IN ('user', 'agent')),
+          source_ref_message_id INTEGER,
+          couple_visible INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_record_tags_record ON record_tags(record_id);
+        CREATE INDEX IF NOT EXISTS idx_record_tags_user ON record_tags(user_id);
+
+        -- 单人/双人 AI 报告
+        CREATE TABLE IF NOT EXISTS insights (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scope TEXT NOT NULL CHECK (scope IN ('single', 'couple')),
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          couple_key TEXT,
+          period_type TEXT NOT NULL CHECK (period_type IN ('week', 'month', 'manual')),
+          period_start TEXT NOT NULL,
+          period_end TEXT NOT NULL,
+          content TEXT NOT NULL,
+          model TEXT NOT NULL DEFAULT '',
+          prompt_version TEXT NOT NULL DEFAULT '',
+          tokens INTEGER NOT NULL DEFAULT 0,
+          sources TEXT,            -- JSON：联网检索的引用
+          input_hash TEXT NOT NULL DEFAULT '',
+          covered_until TEXT,      -- 增量分析的水位
+          generated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_insights_single_user ON insights(scope, user_id, period_start);
+        CREATE INDEX IF NOT EXISTS idx_insights_couple_key ON insights(scope, couple_key, period_start);
+
+        -- 双人增量记忆：记录上次分析覆盖到哪一天 + 摘要
+        CREATE TABLE IF NOT EXISTS couple_memory (
+          couple_key TEXT PRIMARY KEY,
+          summary TEXT NOT NULL DEFAULT '',
+          covered_until TEXT NOT NULL DEFAULT '',
+          updated_at TEXT NOT NULL
+        );
+
+        -- 问答会话
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          title TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id);
+
+        -- 问答消息
+        CREATE TABLE IF NOT EXISTS chat_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+          content TEXT NOT NULL,
+          refs TEXT,               -- JSON：引用的报告 / 记录 ID
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+      `)
+    }
   }
 ]
 
