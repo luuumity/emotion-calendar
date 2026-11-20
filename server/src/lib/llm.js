@@ -3,7 +3,7 @@
 // 未配置 API key 时，call() 返回占位内容，不抛错——方便本地联调 UI
 
 const BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
-const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
+const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
 
 const API_KEY = process.env.DEEPSEEK_API_KEY
 const HAS_KEY = Boolean(API_KEY)
