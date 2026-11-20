@@ -6,10 +6,11 @@
 import { db } from '../db.js'
 import { callDeepSeek, hasDeepSeekKey } from './llm.js'
 
-const HISTORY_TOKEN_LIMIT = 1500  // 未压缩历史的估算 token 上限
-const MAX_PENDING = 24            // 兜底：超短消息堆积时也能触发
+const HISTORY_TOKEN_LIMIT = 4000  // 未压缩历史的估算 token 上限
+const MAX_PENDING = 40            // 兜底：超短消息堆积时也能触发
 const KEEP_RECENT = 6             // 压缩后保留的最近原文条数
 const SUMMARY_LIMIT = 1200
+const SUMMARY_INPUT_CHARS = 24000 // 单次摘要输入的字符预算，超了本轮就少压几条
 const DEFAULT_TOKENS_PER_CHAR = 1 / 1.5
 
 function charsOf(row) {
@@ -35,7 +36,7 @@ function transcriptOf(rows) {
   return rows
     .map((m) => {
       const who = m.role === 'user' ? '用户' : '我'
-      const text = String(m.content || '').replace(/\s+/g, ' ').slice(0, 400)
+      const text = String(m.content || '').replace(/\s+/g, ' ')
       return `${who}：${text}`
     })
     .join('\n')
@@ -74,7 +75,16 @@ export async function ensureCompressed(sessionId) {
   // 没有 key 时不让占位文本变成摘要
   if (!hasDeepSeekKey()) return { summary, untilId, degraded: true }
 
-  const cut = pending.slice(0, pending.length - KEEP_RECENT)
+  // 按字符预算从最早的消息开始取，保证每条都是完整的；超预算的留到下一轮再压
+  const cutAll = pending.slice(0, pending.length - KEEP_RECENT)
+  const cut = []
+  let cutChars = 0
+  for (const m of cutAll) {
+    const len = charsOf(m)
+    if (cut.length >= 2 && cutChars + len > SUMMARY_INPUT_CHARS) break
+    cut.push(m)
+    cutChars += len
+  }
   const cutUntil = cut[cut.length - 1].id
 
   const prompt = `把下面这段对话压缩成摘要，不超过 300 字。

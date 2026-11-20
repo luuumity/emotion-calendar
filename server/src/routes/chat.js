@@ -286,17 +286,18 @@ router.post('/sessions/:id/messages', async (req, res) => {
     db.prepare('UPDATE chat_sessions SET title = ? WHERE id = ?').run(autoTitle, id)
   }
 
-  // 2. 历史：真实 user/assistant 消息（已压缩的部分不再重复发送，最多 12 条）
+  // 2. 历史：真实 user/assistant 消息（已压缩的部分不再重复发送）
+  // 条数上限只是压缩降级时的熔断，正常由 token 阈值压缩兜底
   const history = db
     .prepare(
       `SELECT role, content FROM chat_messages
        WHERE session_id = ? AND id > ? AND id < ?
-       ORDER BY id DESC LIMIT 12`
+       ORDER BY id DESC LIMIT 60`
     )
     .all(id, compressed.untilId, userInfo.lastInsertRowid)
     .reverse()
     .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 2000) }))
+    .map((m) => ({ role: m.role, content: String(m.content || '') }))
 
   // 3. 稳定块 / 事实 / 记忆块 / 压缩摘要
   const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(req.user.id)?.display_name || '用户'
