@@ -16,6 +16,10 @@
 | AI 标签展示 | 已完成 | 日视图展示；**agent 写入标签未做** |
 | `deepseek_read_url` | 已完成 | 聊天与报告恒定声明，只计 token；报告 prompt 已改为 system + user |
 | 模型 | 已完成 | 默认 `deepseek-v4-flash`（`deepseek-chat` 已于 2026-07-24 弃用） |
+| 图像理解 + Files API | 待做 | 截图作为理由/对话输入；默认仅自己可见 |
+| usage 记账 / 缓存前缀 / 思考开关 | 待做 | 见 §2.13 |
+| JSON 输出 / OCR | 暂缓 | 用途未定，见 §2.13 |
+| Persona 专业化 | 暂缓 | 仅记录思路，见 §2.14 |
 | 定时报告 / 每日聚合 | 未做（方案已定） | systemd timer 每小时跑 `sweep-insights.mjs`，见 §2.1 |
 | 聊天 token 记账 | 未做 | `chat_messages` 需增加 prompt/completion tokens |
 | §3 私密记录 `is_private` | 未做 | 当前裁剪只按 `couple_visible` + scope |
@@ -386,6 +390,41 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 - [联网工具](https://api-docs.deepseek.com/zh-cn/guides/web_tools)
 - [网页搜索与抓取](https://api-docs.deepseek.com/zh-cn/guides/search/)
 - [模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
+
+#### 2.13 DeepSeek API 采纳清单（2026-11-20 定）
+
+**要用的**
+
+- [ ] **usage 记账**：落 `prompt_tokens` / `completion_tokens` / `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，报告与对话都记
+- [ ] **上下文缓存优化**：prompt 前缀顺序改为「固定指令 → 稳定 persona/facts → 可变记录/历史」，让不变部分命中缓存（命中 0.02 元/M vs 未命中 1 元/M）
+- [ ] **思考模式开关**：聊天关闭（要快），单人/双人报告开启（要深）；通过请求体配置，不共用默认值
+- [ ] **图像理解 + Files API**：记录/聊天支持上传截图，走 Files API 传 `file_id` 复用（免费），单图最多 384 tokens
+  - 主要场景：聊天记录截图、社交平台截图、手写纸条
+  - **隐私**：截图常含对方原话，默认按「仅自己可见」处理，不进入双人报告，除非用户显式放开
+
+**暂缓（用途未定，先不做）**
+
+- [ ] JSON 结构化输出：聊天不需要；报告若要做分区渲染、字段缺失检测、自动评测时才需要，届时再定 schema
+- [ ] OCR：与视觉的分工是「单张截图走视觉，多页文档走 OCR」；当前没有长文档场景，不接
+
+**明确不做**
+
+- [x] ASR：手机输入法自带语音输入，没必要重复建设
+- [x] TTS：非刚需
+- [x] Fine-tuning、FIM、Responses API：与场景不匹配
+
+#### 2.14 Persona 专业化（暂缓，仅记录思路）
+
+结论：**当前不定位于"心理学专家/治疗师"**，保持"能排忧解难的对话伙伴"。以下改造暂不实施，原因是：收益未经验证、需要评测集才能判断是否更好、成本高、框架可能过时、后期改造代价大。
+
+若未来要做，按四层推进：
+
+1. **理论骨架**：个人侧 CBT 认知三角（情境→自动思维→情绪→行为）；双人侧 Gottman 四骑士与修复尝试 + NVC（观察-感受-需要-请求）。报告结构固定，而非自由发挥
+2. **边界与安全（代码层）**：自伤/自杀直接返回固定话术 + 12356 全国心理援助热线；家暴/威胁走安全优先，不做调解；拒绝诊断标签与关系判决；每条结论至少给一个替代解释，禁止无条件站队
+3. **证据绑定**：每个判断挂到具体记录（日期 + 分值 + 原文），无证据标注"推测"
+4. **评测**：30–50 条金标准场景 + 评分维度（共情、准确、无诊断、不站队、可执行、安全），改 prompt 必须跑回归；双人报告可选加一道"审稿"调用
+
+参考产品：Wysa / Woebot（结构化 CBT）、Rosebud / Mindsera（日记反思）、Connected / Pragma / Harmony（Gottman / EFT / NVC）。风险参考：APA 2026 指南明确 AI 不能用于诊断；综述记录谄媚、自杀风险处理不一致、情感依赖等风险。
 
 ### 3. 私密记录标签（配合双人分析）
 
