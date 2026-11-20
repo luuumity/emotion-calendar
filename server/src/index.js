@@ -8,6 +8,10 @@ import authRoutes from './routes/auth.js'
 import recordRoutes from './routes/records.js'
 import accessRoutes from './routes/access.js'
 import pushRoutes from './routes/push.js'
+import factsRoutes from './routes/facts.js'
+import tagsRoutes from './routes/tags.js'
+import insightsRoutes from './routes/insights.js'
+import chatRoutes from './routes/chat.js'
 import { startReminderScheduler } from './push.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -33,6 +37,10 @@ app.use('/api/auth', authRoutes)
 app.use('/api/records', recordRoutes)
 app.use('/api/access', accessRoutes)
 app.use('/api/push', pushRoutes)
+app.use('/api/facts', factsRoutes)
+app.use('/api/tags', tagsRoutes)
+app.use('/api/insights', insightsRoutes)
+app.use('/api/chat', chatRoutes)
 
 app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在' }))
 
