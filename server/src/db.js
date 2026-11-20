@@ -232,6 +232,14 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_facts_user_content ON facts(user_id, content, couple_visible);
       `)
     }
+  },
+  {
+    version: 6,
+    // 会话压缩摘要：summary 存滚动摘要，summary_until_id 标记已压缩到哪条消息
+    up() {
+      db.exec(`ALTER TABLE chat_sessions ADD COLUMN summary TEXT NOT NULL DEFAULT '';`)
+      db.exec(`ALTER TABLE chat_sessions ADD COLUMN summary_until_id INTEGER NOT NULL DEFAULT 0;`)
+    }
   }
 ]
 

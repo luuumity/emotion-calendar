@@ -6,6 +6,7 @@ import { Router } from 'express'
 import { db } from '../db.js'
 import { requireUser } from '../auth.js'
 import { callDeepSeek } from '../lib/llm.js'
+import { ensureCompressed } from '../lib/compress.js'
 import { getDefaultSystemPrompt } from '../lib/persona.js'
 import { buildChatMessages } from '../lib/prompts/chat.js'
 
@@ -192,6 +193,9 @@ router.post('/sessions/:id/messages', async (req, res) => {
 
   if (!content) return res.status(400).json({ error: '消息不能为空' })
 
+  // 0. 压缩：必须在写入本轮消息之前，否则本轮会被误压进摘要
+  const compressed = await ensureCompressed(id)
+
   const now = nowIso()
 
   // 1. 存 user 消息
@@ -210,25 +214,31 @@ router.post('/sessions/:id/messages', async (req, res) => {
     db.prepare('UPDATE chat_sessions SET title = ? WHERE id = ?').run(autoTitle, id)
   }
 
-  // 2. 历史：真实 user/assistant 消息（不含本轮，最多 11 条）
+  // 2. 历史：真实 user/assistant 消息（已压缩的部分不再重复发送，最多 12 条）
   const history = db
-    .prepare('SELECT role, content FROM chat_messages WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT 11')
-    .all(id, userInfo.lastInsertRowid)
+    .prepare(
+      `SELECT role, content FROM chat_messages
+       WHERE session_id = ? AND id > ? AND id < ?
+       ORDER BY id DESC LIMIT 12`
+    )
+    .all(id, compressed.untilId, userInfo.lastInsertRowid)
     .reverse()
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 800) }))
 
-  // 3. 稳定块 / 事实 / 记忆块
+  // 3. 稳定块 / 事实 / 记忆块 / 压缩摘要
   const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(req.user.id)?.display_name || '用户'
   const factsBlock = buildFactsBlock(req.user.id)
   const memoryBlock = buildMemoryBlock(req.user.id)
+  const summaryBlock = compressed.summary ? `【本次对话的早期摘要】\n${compressed.summary}` : ''
 
-  // 4. 调模型：稳定前缀 → facts → 记忆 → 历史 → 本轮
+  // 4. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史 → 本轮
   const messages = buildChatMessages({
     personaPrompt: getDefaultSystemPrompt(),
     displayName,
     factsBlock,
     memoryBlock,
+    summaryBlock,
     history,
     userMessage: content,
     refs

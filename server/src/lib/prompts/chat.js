@@ -1,5 +1,5 @@
 // 日常问答 prompt 模板（P0）
-// 结构：稳定人格/规则 → facts → 记忆块 → 真实历史 → 本轮消息
+// 结构：稳定人格/规则 → facts → 记忆块 → 压缩摘要 → 真实历史 → 本轮消息
 // 只有最后一条每轮必变，其余按变化频率从低到高排列，便于命中前缀缓存。
 
 export function buildChatMessages({
@@ -7,6 +7,7 @@ export function buildChatMessages({
   displayName,
   factsBlock = '',
   memoryBlock = '',
+  summaryBlock = '',
   history = [],
   userMessage,
   refs = []
@@ -28,6 +29,7 @@ export function buildChatMessages({
 
   if (factsBlock) messages.push({ role: 'system', content: factsBlock })
   if (memoryBlock) messages.push({ role: 'system', content: memoryBlock })
+  if (summaryBlock) messages.push({ role: 'system', content: summaryBlock })
 
   for (const m of history) {
     messages.push({ role: m.role, content: m.content })
