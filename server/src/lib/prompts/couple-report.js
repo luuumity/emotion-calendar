@@ -50,3 +50,41 @@ ${lastSummary ? `===== 上次分析的压缩记忆 =====\n${lastSummary}\n` : ''
     }
   ]
 }
+
+/**
+ * 生成 couple_memory 的压缩记忆：旧记忆 + 本期增量记录 → 新记忆。
+ * 和报告分开调用，避免直接把报告开头当记忆。
+ */
+export function buildCoupleMemoryMessages({
+  lastSummary = '',
+  periodStart,
+  periodEnd,
+  partnerAName,
+  partnerBName,
+  recordsA = [],
+  recordsB = []
+}) {
+  const line = (r) => `  - ${r.day}: 分数 ${r.score}${r.note ? `; 理由: ${r.note}` : ''}`
+  const aBlock = recordsA.length ? recordsA.map(line).join('\n') : '（无记录）'
+  const bBlock = recordsB.length ? recordsB.map(line).join('\n') : '（无记录）'
+
+  return [
+    {
+      role: 'system',
+      content: '你是情侣情绪日志的记忆整理器。只做客观压缩，不评价、不建议、不编造。只输出记忆正文。'
+    },
+    {
+      role: 'user',
+      content: `把下面这段情侣记忆整理成不超过 300 字的摘要。
+保留：具体事件、情绪转折、关系变化、已经确认过的结论、尚未解决的事。
+不要写分数统计表，不要写建议。
+
+${lastSummary ? `【已有记忆】\n${lastSummary}\n\n` : ''}【本期记录 ${periodStart} ~ ${periodEnd}】
+${partnerAName}：
+${aBlock}
+
+${partnerBName}：
+${bBlock}`
+    }
+  ]
+}

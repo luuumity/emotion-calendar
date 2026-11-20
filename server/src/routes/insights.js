@@ -11,12 +11,29 @@ import { serializePersona } from '../lib/persona.js'
 import { cropForCouple } from '../lib/privacy.js'
 import { makeCoupleKey, getOrInitCoupleMemory, computeIncrementStart, updateCoupleMemory, isInCouple } from '../lib/incremental.js'
 import { buildSingleReportMessages } from '../lib/prompts/single-report.js'
-import { buildCoupleReportMessages } from '../lib/prompts/couple-report.js'
+import { buildCoupleReportMessages, buildCoupleMemoryMessages } from '../lib/prompts/couple-report.js'
 
 const router = Router()
 router.use(requireUser)
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+const COUPLE_MEMORY_LIMIT = 300
+
+/**
+ * 把旧记忆 + 本期增量记录压成新记忆。
+ * 失败时返回 null，由调用方退回旧行为（截取报告开头），不影响报告本身。
+ */
+async function summarizeCoupleMemory(input) {
+  try {
+    const result = await callDeepSeek(buildCoupleMemoryMessages(input), { tools: false, temperature: 0.2 })
+    const text = String(result.content || '').trim().slice(0, COUPLE_MEMORY_LIMIT)
+    if (!text) return null
+    return { text, usage: result.usage || {} }
+  } catch (err) {
+    console.error('[insights] 双人记忆摘要失败，降级为报告开头:', err.message)
+    return null
+  }
+}
 
 // ======== 工具函数 ========
 
@@ -243,6 +260,9 @@ router.post('/couple/generate', async (req, res) => {
   const aCropped = cropForCouple({ ...aPool, records: rawRecordsA }, 'full')
   const bCropped = cropForCouple({ ...bPool, records: rawRecordsB }, 'full')
 
+  // 首次生成时没有水位，用本期最早的一条记录作为开始日期
+  const analysisStart = incrementStart || rawRecordsA[0]?.day || rawRecordsB[0]?.day || periodEnd
+
   // 序列化两个 persona
   const personaA = serializePersona({
     displayName: me.display_name,
@@ -267,13 +287,26 @@ router.post('/couple/generate', async (req, res) => {
     partnerBName: partner.display_name,
     recordsA: aCropped.records,
     recordsB: bCropped.records,
-    periodStart: incrementStart || rawRecordsA[0]?.day || rawRecordsB[0]?.day || periodEnd,
+    periodStart: analysisStart,
     periodEnd,
     lastSummary: memory.summary
   })
 
   try {
     const result = await callDeepSeek(messages)
+
+    // 记忆摘要：旧记忆 + 本期增量记录 → 新记忆；失败则退回截取报告开头
+    const memoryResult = await summarizeCoupleMemory({
+      lastSummary: memory.summary,
+      periodStart: analysisStart,
+      periodEnd,
+      partnerAName: me.display_name,
+      partnerBName: partner.display_name,
+      recordsA: aCropped.records,
+      recordsB: bCropped.records
+    })
+    const nextSummary = memoryResult?.text || result.content.slice(0, COUPLE_MEMORY_LIMIT)
+    const totalTokens = (result.usage?.total_tokens || 0) + (memoryResult?.usage?.total_tokens || 0)
 
     // 写 insights
     const generatedAt = now.toISOString()
@@ -283,17 +316,15 @@ router.post('/couple/generate', async (req, res) => {
        VALUES (?, NULL, ?, 'manual', ?, ?, ?, ?, 'couple-v1', ?, ?, ?)`
     ).run(
       'couple', coupleKey,
-      incrementStart || rawRecordsA[0]?.day || rawRecordsB[0]?.day || periodEnd,
+      analysisStart,
       periodEnd,
       result.content,
       result.model,
-      result.usage.total_tokens || 0,
+      totalTokens,
       periodEnd,
       generatedAt
     )
 
-    // 更新 couple_memory：covered_until = 今天；summary = 报告前 200 字压缩记忆
-    const nextSummary = result.content.slice(0, 300)
     updateCoupleMemory(coupleKey, periodEnd, nextSummary)
 
     const row = db.prepare('SELECT * FROM insights WHERE scope = ? AND couple_key = ? AND generated_at = ?').get('couple', coupleKey, generatedAt)
