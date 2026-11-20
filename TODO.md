@@ -460,9 +460,9 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 
 | 类别 | 内容 | 时机 |
 |---|---|---|
-| 被动注入 | system prompt、facts top-N、近 14 天记录摘要、最近报告摘要、会话摘要 | 每次请求 |
+| 被动注入 | system prompt、facts top-N、近 14 天记录摘要、最近报告摘要、压缩摘要 | 每次请求 |
 | 主动取数 | 原始记录时间窗、某天详情、关键词检索、历史报告全文 | 模型判断需要时 |
-| 系统自动写 | 会话摘要、insights、memory 水位、usage | 生成后 |
+| 系统自动写 | 压缩摘要、insights、memory 水位、usage | 生成后 |
 | 需确认写 | facts、record_tags | proposal → 用户确认 → API 落库 |
 
 注：`record_tags`（AI 洞察）**不再单独注入**。每天取 1–2 个并入摘要；跨记录的模式应沉淀为 facts。
@@ -488,12 +488,13 @@ Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，
 | 1 | system | 固定人格 + 回答规则 + 工具策略 + 隐私边界 + prompt 版本号 | 仅发版时变 |
 | 2 | system | facts（按 id 稳定排序，最多 30 条、每条 ≤120 字；pinned 置顶） | 用户确认新事实时变 |
 | 3 | system | 记忆块：最近 1 份报告摘要 + 近 14 天记录摘要（规则生成，每天一行） | 新增记录/报告时变 |
-| 4 | system | 会话滚动摘要（仅在历史被压缩后存在） | 每约 10 轮变一次 |
+| 4 | system | 压缩摘要（仅在历史被压缩后存在） | 每约 10 轮变一次 |
 | 5 | user / assistant | 最近的真实对话轮次（最多 12 条），**不再塞进 system** | 每轮追加 |
 | 6 | user | 本轮消息 | 每轮必变 |
 
 - 只有第 6 条每轮必变；其余按"变化越频繁越靠后"排列
 - 记忆块放在历史**之前**而非紧贴 user：它只在新增记录时变，放前面可跨轮命中；放尾部会因历史增长而每轮重算
+- **记忆块 vs 压缩摘要**：记忆块是"关于用户生活"的跨会话知识（来自 records/insights，换会话仍在）；压缩摘要是"关于本次对话"的会话内记忆（来自 chat_messages，换会话即失效）
 - `persona.js` 中【最近对话片段】【AI 洞察】两个段落删除；对话历史改由真实消息承载
 - facts 用 id 升序保证顺序稳定（按 confidence 排序会在置信度变化时打乱前缀）
 - 禁止把"今天是 X 月 X 日"、条数统计等每轮变化内容写进 system
@@ -504,7 +505,7 @@ Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，
 
 被动注入的固定策略容易过时，改为「少量稳定上下文 + 按需取数」：
 
-- 常驻只保留：system、facts、近 14 天记录摘要、最近一份报告摘要、会话摘要
+- 常驻只保留：system、facts、近 14 天记录摘要、最近一份报告摘要、压缩摘要
 - 只读工具：`get_days(start,end)`、`get_day(date)`、`search_records(query,start,end)`、`list_reports(scope,limit)`、`get_report(id)`
 - 限制：单轮最多 3 次工具调用；单次结果 ≤2k tokens；超出由工具侧截断
 - 冷启动（无 facts、无报告）：允许模型先 `get_days` 读全量，或提出"生成一份从开始到现在的报告"
@@ -546,7 +547,7 @@ propose_report({ start, end })
 | system（含人格与规则） | 1.5k tokens |
 | facts | 30 条 × 120 字 |
 | 最近一份报告摘要 | 400 tokens |
-| 会话摘要 | 400 tokens |
+| 压缩摘要 | 400 tokens |
 | 真实历史 | 1500 tokens / 12 条 |
 | 单次工具结果 | 2k tokens |
 
@@ -607,7 +608,7 @@ propose_report({ start, end })
 
 - [ ] P0：改 messages 结构（历史出 system、真实 role、稳定前缀）
 - [ ] P1：主动读工具 + 工具循环 + 上限
-- [ ] P2：会话滚动摘要 + `couple_memory` 真摘要
+- [ ] P2：压缩摘要 + `couple_memory` 真摘要
 - [ ] P3：写协议（proposal 工具 + 确认接口 + 三类落库）
 - [ ] P4：流式输出 + run 生命周期（断线补全）
 - [ ] 前置实测：服务端工具与客户端 function tools 共存；流式下的 tool_calls 拼接
