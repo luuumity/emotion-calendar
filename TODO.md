@@ -550,6 +550,9 @@ propose_report({ start, end })
 
 - 工具写在请求的 `tools` 参数里，**不进 messages**；格式为 `{type:'function', function:{name, description, parameters(JSON Schema)}}`
 - 一轮内的调用以 `assistant.tool_calls` + `role:'tool'`（带 `tool_call_id`）出现在 messages 中，**只在该轮请求链里使用，不持久化、不回放**
+  - 持久化边界：只存 `user` 与最终 `assistant` 两条；tool 消息用完即弃
+  - 理由：旧结果会过时、JSON 冗长、官方不支持在历史中间插入工具调用、历史保持稳定才能命中前缀缓存
+  - 代价：模型不记得上次查过什么，可能重复调用；查询是本地 SQLite，可接受
 - 参数由后端校验；`strict` 模式需走 `/beta` 且所有 object 的 `additionalProperties:false`、属性全 required，暂不启用
 - 限制：Chat Completion 不支持在历史中间插入工具调用（官方说明）；需要时改用 Responses API
 - 注意：开启思考模式且带 `tools` 时，后续请求必须回传 `reasoning_content`，否则 400；聊天计划关闭思考，暂不受影响
@@ -574,6 +577,14 @@ propose_report({ start, end })
 - 客户端被杀、切后台、断网都不影响服务端完成；回来时按 `runId` 或消息列表补全结果
 - 服务重启时，把 `running` 的 run 标记为 `failed`，前端提示重试
 - 若暂不引入 `chat_runs`：可先保留同步接口，服务端在客户端断开后仍会完成并落库，重新进入时靠拉取消息补全；缺点是丢失流式过程
+
+三档体验（结果完整性都不受影响，差别在过程与状态可见性）：
+
+| 档 | 做法 | 离开再回来 |
+|---|---|---|
+| 1 | 同步非流式（现状） | 结果完整，但等待期间无反馈，回来后若尚未写完看不到"生成中" |
+| 2 | 流式 + 结束落库 | 过程逐字出现；断线丢过程，回来拉全量覆盖 |
+| 3 | run + 可恢复事件流 | 按 runId 续传，最接近 Trae/WorkBuddy |
 
 **分期**
 
