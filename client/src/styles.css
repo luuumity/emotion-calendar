@@ -2657,6 +2657,8 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: nowrap;
+  gap: 14px;
 }
 
 .chat-head-left {
@@ -2667,15 +2669,21 @@ p {
   min-width: 0;
 }
 
+.chat-head-left > button {
+  flex-shrink: 0;
+}
+
 .chat-title-inline {
   margin: 0;
   font-size: 17px;
+  flex-shrink: 0;
 }
 
 .chat-head-right {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 /* 侧边栏弹层的遮罩 */
@@ -2707,15 +2715,11 @@ p {
 
 .chat-session-list {
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  box-shadow: var(--shadow-sm);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  align-self: start;
-  height: min(58vh, 420px);
-  margin: 14px;
+  min-height: 0;
 }
 
 .chat-session-head {
