@@ -36,7 +36,7 @@ function sessionView(row, messageCount = 0) {
   }
 }
 
-function messageView(row) {
+function messageView(row, proposals = []) {
   if (!row) return null
   let refs = null
   try { refs = row.refs ? JSON.parse(row.refs) : null } catch { refs = null }
@@ -45,7 +45,23 @@ function messageView(row) {
     role: row.role,
     content: row.content,
     refs,
+    proposals,
     createdAt: row.created_at
+  }
+}
+
+function proposalView(row) {
+  let payload = null
+  try { payload = row.payload ? JSON.parse(row.payload) : null } catch { payload = null }
+  return {
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    payload,
+    coupleVisible: Boolean(row.couple_visible),
+    resultRefId: row.result_ref_id,
+    createdAt: row.created_at,
+    decidedAt: row.decided_at
   }
 }
 
@@ -104,10 +120,20 @@ router.get('/sessions/:id/messages', (req, res) => {
   if (!id) return res.status(400).json({ error: '无效的会话编号' })
   if (!sessionBelongsToUser(id, req.user.id)) return res.status(404).json({ error: '没有找到这个会话' })
 
+  const proposalRows = db
+    .prepare('SELECT * FROM chat_proposals WHERE session_id = ? AND message_id IS NOT NULL ORDER BY id ASC')
+    .all(id)
+  const byMessage = new Map()
+  for (const row of proposalRows) {
+    const list = byMessage.get(row.message_id) || []
+    list.push(proposalView(row))
+    byMessage.set(row.message_id, list)
+  }
+
   const messages = db
     .prepare('SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, id ASC')
     .all(id)
-    .map(messageView)
+    .map((row) => messageView(row, byMessage.get(row.id) || []))
 
   res.json({ messages })
 })
@@ -193,7 +219,7 @@ function mergeUsage(total, usage) {
  * 工具循环：模型可调用 get_days / get_tags 按需取数。
  * 相同参数的重复调用直接拒绝，避免原地打转。
  */
-async function runWithTools(baseMessages, userId) {
+async function runWithTools(baseMessages, ctx) {
   const work = [...baseMessages]
   const seen = new Set()
   let usage = {}
@@ -233,7 +259,7 @@ async function runWithTools(baseMessages, userId) {
         } catch {
           args = {}
         }
-        output = executeTool(name, args, userId)
+        output = executeTool(name, args, ctx)
       }
 
       work.push({ role: 'tool', tool_call_id: call.id, content: output })
@@ -321,24 +347,47 @@ router.post('/sessions/:id/messages', async (req, res) => {
     refs
   })
 
-  try {
-    const result = await runWithTools(messages, req.user.id)
+  // 本轮提议收集器：工具执行时 assistant 消息还没落库，先记 id，稍后回填 message_id
+  const run = { proposalIds: [], reportCount: 0 }
 
-    // 5. 存 assistant 回复
+  try {
+    const result = await runWithTools(messages, { userId: req.user.id, sessionId: id, run })
+
+    // 5. 存 assistant 回复（模型只提议时可能没有正文，给一句兜底）
+    const assistantText = result.content || (run.proposalIds.length ? '我整理了几条建议，等你确认。' : '')
     const assistantInfo = db
       .prepare(
         'INSERT INTO chat_messages (session_id, role, content, refs, prompt_tokens, prompt_chars, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?)'
       )
-      .run(id, 'assistant', result.content, result.lastPromptTokens, result.lastPromptChars, nowIso())
+      .run(id, 'assistant', assistantText, result.lastPromptTokens, result.lastPromptChars, nowIso())
 
-    // 6. 返回
+    // 6. 把本轮提议绑定到这条 assistant 消息
+    if (run.proposalIds.length) {
+      const placeholders = run.proposalIds.map(() => '?').join(',')
+      db.prepare(
+        `UPDATE chat_proposals SET message_id = ?
+         WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`
+      ).run(assistantInfo.lastInsertRowid, id, req.user.id, ...run.proposalIds)
+    }
+
+    // 7. 返回
     const assistantMsg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(assistantInfo.lastInsertRowid)
+    const proposals = run.proposalIds.length
+      ? db
+          .prepare(`SELECT * FROM chat_proposals WHERE id IN (${run.proposalIds.map(() => '?').join(',')}) ORDER BY id ASC`)
+          .all(...run.proposalIds)
+          .map(proposalView)
+      : []
     res.status(201).json({
       userMessage: db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(userInfo.lastInsertRowid),
-      assistantMessage: messageView(assistantMsg),
+      assistantMessage: messageView(assistantMsg, proposals),
       usage: result.usage
     })
   } catch (err) {
+    // 调用失败：本轮未绑定的提议直接清掉，避免孤儿
+    if (run.proposalIds.length) {
+      db.prepare(`DELETE FROM chat_proposals WHERE id IN (${run.proposalIds.map(() => '?').join(',')})`).run(...run.proposalIds)
+    }
     console.error('[chat] 调用失败:', err.message)
     res.status(500).json({ error: 'AI 暂时不可用，请稍后再试' })
   }

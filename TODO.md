@@ -587,10 +587,11 @@ propose_report({ start, end })
 
 提议与确认：
 
-- proposal 落库（`chat_proposals`：id、message_id、type、payload、status、created_at、expires_at）
-- 状态：`pending` → `confirmed` / `dismissed` / `superseded`
-- **确认不占用连接**：用户点按钮才发一次确认请求；用户直接输入新问题时，把该会话所有 `pending` 标记为 `superseded`
-- 刷新/换设备后仍能看到待确认项；过期（如 7 天）自动置 `dismissed`
+- proposal 落库（`chat_proposals`：id、user_id、session_id、message_id、kind、payload、status、couple_visible、result_ref_id、created_at、decided_at）
+- 状态：`pending` → `accepted` / `rejected`；确认接口用条件更新兜并发，重复确认返回 409
+- 同一会话内同 kind、同内容的 pending 提议不重复创建；fact 还会查 facts 表已有内容
+- 刷新/换设备后仍能看到待确认项（提议随消息列表返回，挂在对应 assistant 消息下）
+- 未做：提议编辑、7 天过期、用户直接输入新问题时自动把 pending 置为 superseded
 
 生成与断线：
 
@@ -614,7 +615,7 @@ propose_report({ start, end })
 - [x] P1：主动读工具 + 工具循环 + 上限 —— `39fc7a6`；后补齐 `get_record(id)` / `get_report(id?)`（权限按本人 + 参与的双人报告），实测通过（结果 > 6000 字符返回提示、相同参数重复调用拒绝、8 步熔断）
 - [x] P1b：压缩触发从「12 条」改为「历史估算 token > 4000 或未压缩消息 > 40 条」，用实测 usage 校准比例；v7 迁移记录 `prompt_tokens/prompt_chars`，供校准与成本统计。历史全文回放（60 条仅作熔断），摘要输入按 24000 字符预算取完整消息
 - [x] P2b：`couple_memory` 真摘要——旧记忆 + 本期增量记录单独调一次压缩（≤300 字），不再截取报告开头；失败退回旧行为。实测两轮增量后记忆仍保留首轮事件
-- [ ] P3：写协议（proposal 工具 + 确认接口 + 三类落库）
+- [x] P3a：写协议（propose_fact / propose_tag / propose_report + `/api/proposals` 确认接口 + 聊天确认卡片）；报告提议只支持单人，采纳后由前端触发生成；双人报告等 `get_partners` 再做
 - [ ] P4：流式输出 + run 生命周期（断线补全）
 - [x] 前置实测：服务端工具与客户端 function tools 共存（可用）；`deepseek_read_url` 对 B 站可用、对小红书被拦
 - [ ] 前置实测：流式下的 `tool_calls` 分片拼接（等 P4）

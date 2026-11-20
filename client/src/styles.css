@@ -2916,6 +2916,95 @@ p {
   align-items: center;
 }
 
+.chat-proposals {
+  align-self: flex-start;
+  max-width: 78%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+.chat-proposal {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.chat-proposal.accepted {
+  border-color: rgba(111, 154, 120, 0.45);
+  background: var(--sage-soft);
+}
+
+.chat-proposal.rejected {
+  opacity: 0.6;
+}
+
+.chat-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.chat-proposal-kind {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--coral-deep);
+  background: var(--coral-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.chat-proposal-day {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.chat-proposal-body {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.chat-proposal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.chat-proposal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-proposal-actions .primary-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+}
+
+.chat-proposal-status {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--sage);
+}
+
+.chat-proposal-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
 .chat-dot {
   width: 7px;
   height: 7px;

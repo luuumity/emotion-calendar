@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type ChatSession, type ChatMessage } from '../lib/api'
+import { useNavigate } from 'react-router-dom'
+import { api, type ChatSession, type ChatMessage, type ChatProposal } from '../lib/api'
 
 function formatTime(iso: string) {
   const d = new Date(iso)
@@ -329,12 +330,130 @@ export function ChatPage() {
 
 function Bubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user'
+  const proposals = message.proposals || []
   return (
-    <div className={'chat-bubble ' + (isUser ? 'user' : 'assistant')}>
-      {message.content.split('\n').map((line, i) => (
-        <p key={i}>{line || '\u00A0'}</p>
-      ))}
-      <span className="chat-bubble-time">{formatTime(message.createdAt)}</span>
+    <>
+      <div className={'chat-bubble ' + (isUser ? 'user' : 'assistant')}>
+        {message.content.split('\n').map((line, i) => (
+          <p key={i}>{line || '\u00A0'}</p>
+        ))}
+        <span className="chat-bubble-time">{formatTime(message.createdAt)}</span>
+      </div>
+      {proposals.length > 0 && (
+        <div className="chat-proposals">
+          {proposals.map((p) => (
+            <ProposalCard key={p.id} proposal={p} />
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+const KIND_LABEL: Record<ChatProposal['kind'], string> = { fact: '记忆', tag: '标签', report: '报告' }
+const TAG_TYPE_LABEL: Record<string, string> = {
+  insight: '洞察',
+  suggestion: '建议',
+  pattern: '模式',
+  correction: '纠正'
+}
+
+function proposalText(item: ChatProposal) {
+  const p = item.payload
+  if (item.kind === 'report') {
+    const range = p?.start && p?.end ? `${p.start} ~ ${p.end}` : p?.periodType === 'month' ? '本月' : '本周'
+    return `生成一份单人报告（${range}）`
+  }
+  return p?.content || ''
+}
+
+function ProposalCard({ proposal }: { proposal: ChatProposal }) {
+  const [item, setItem] = useState(proposal)
+  const [visible, setVisible] = useState(proposal.coupleVisible)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const pending = item.status === 'pending'
+  const p = item.payload
+
+  async function accept() {
+    if (busy) return
+    setBusy(true)
+    setNote(null)
+    try {
+      const res = await api.acceptProposal(item.id, visible)
+      setItem(res.proposal)
+      if (res.action) {
+        setNote('正在生成报告…')
+        try {
+          await api.generateSingleInsight({
+            periodType: res.action.periodType,
+            start: res.action.start || undefined,
+            end: res.action.end || undefined
+          })
+          navigate('/insights')
+        } catch {
+          setNote('已采纳，但生成失败，去报告页手动重试。')
+        }
+      }
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : '操作失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function reject() {
+    if (busy) return
+    setBusy(true)
+    setNote(null)
+    try {
+      const res = await api.rejectProposal(item.id)
+      setItem(res.proposal)
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : '操作失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={'chat-proposal ' + item.status}>
+      <div className="chat-proposal-head">
+        <span className="chat-proposal-kind">{KIND_LABEL[item.kind]}</span>
+        {item.kind === 'tag' && p?.tagType && (
+          <span className="chat-proposal-day">
+            {p.recordDay ? `${p.recordDay} · ` : ''}
+            {TAG_TYPE_LABEL[p.tagType] || p.tagType}
+          </span>
+        )}
+      </div>
+      <p className="chat-proposal-body">{proposalText(item)}</p>
+      {pending && item.kind !== 'report' && (
+        <label className="chat-proposal-toggle">
+          <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
+          对另一半可见
+        </label>
+      )}
+      {pending ? (
+        <div className="chat-proposal-actions">
+          <button type="button" className="primary-btn" onClick={accept} disabled={busy}>
+            {busy ? '处理中…' : '采纳'}
+          </button>
+          <button type="button" className="ghost-btn small" onClick={reject} disabled={busy}>
+            忽略
+          </button>
+        </div>
+      ) : (
+        <span className="chat-proposal-status">
+          {item.status === 'accepted'
+            ? item.kind === 'report'
+              ? '已采纳'
+              : `已保存（${item.coupleVisible ? '对另一半可见' : '仅自己可见'}）`
+            : '已忽略'}
+        </span>
+      )}
+      {note && <span className="chat-proposal-note">{note}</span>}
     </div>
   )
 }

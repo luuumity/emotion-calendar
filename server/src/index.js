@@ -12,6 +12,7 @@ import factsRoutes from './routes/facts.js'
 import tagsRoutes from './routes/tags.js'
 import insightsRoutes from './routes/insights.js'
 import chatRoutes from './routes/chat.js'
+import proposalRoutes from './routes/proposals.js'
 import { startReminderScheduler } from './push.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -41,6 +42,7 @@ app.use('/api/facts', factsRoutes)
 app.use('/api/tags', tagsRoutes)
 app.use('/api/insights', insightsRoutes)
 app.use('/api/chat', chatRoutes)
+app.use('/api/proposals', proposalRoutes)
 
 app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在' }))
 

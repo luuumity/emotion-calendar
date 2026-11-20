@@ -88,6 +88,60 @@ export const FUNCTION_TOOLS = [
         }
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_fact',
+      description:
+        '提议把一条关于用户的长期事实写入记忆。只是待确认建议，不会立即生效；用户确认后才会保存。',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: '事实内容，1-500 字，用陈述句' },
+          confidence: { type: 'integer', description: '置信度 1-5，默认 3' }
+        },
+        required: ['content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_tag',
+      description:
+        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。recordId 必须来自 get_days 或 get_record。',
+      parameters: {
+        type: 'object',
+        properties: {
+          recordId: { type: 'integer', description: '记录编号' },
+          tagType: {
+            type: 'string',
+            enum: ['insight', 'suggestion', 'pattern', 'correction'],
+            description: '标签类型'
+          },
+          content: { type: 'string', description: '标签内容，1-500 字' }
+        },
+        required: ['recordId', 'tagType', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_report',
+      description:
+        '提议生成一份单人 AI 分析报告。只是待确认建议，用户确认后由前端触发生成。periodType 为 week 或 month；也可以同时给 start/end 指定自定义区间。',
+      parameters: {
+        type: 'object',
+        properties: {
+          periodType: { type: 'string', enum: ['week', 'month'], description: '周期类型' },
+          start: { type: 'string', description: '自定义起始日期 YYYY-MM-DD，可选' },
+          end: { type: 'string', description: '自定义结束日期 YYYY-MM-DD，可选' }
+        },
+        required: ['periodType']
+      }
+    }
   }
 ]
 
@@ -231,18 +285,139 @@ function getReport(userId, args) {
   }
 }
 
+// ======== 写入提议 ========
+// 模型只创建待确认提议，真正落库在 routes/proposals.js
+
+const TAG_TYPES = ['insight', 'suggestion', 'pattern', 'correction']
+const MAX_PROPOSALS_PER_TURN = 3
+
+function normText(input, max) {
+  if (typeof input !== 'string') return null
+  const trimmed = input.trim()
+  if (!trimmed || trimmed.length > max) return null
+  return trimmed
+}
+
+function payloadKey(kind, payload) {
+  if (kind === 'fact') return JSON.stringify([kind, payload.content, payload.confidence])
+  if (kind === 'tag') return JSON.stringify([kind, payload.recordId, payload.tagType, payload.content])
+  return JSON.stringify([kind, payload.periodType, payload.start, payload.end])
+}
+
+function findPendingProposal(sessionId, kind, key) {
+  const rows = db
+    .prepare('SELECT id, payload FROM chat_proposals WHERE session_id = ? AND kind = ? AND status = ?')
+    .all(sessionId, kind, 'pending')
+  for (const row of rows) {
+    let payload
+    try {
+      payload = JSON.parse(row.payload)
+    } catch {
+      continue
+    }
+    if (payloadKey(kind, payload) === key) return row.id
+  }
+  return null
+}
+
+function insertProposal(ctx, kind, payload) {
+  const existing = findPendingProposal(ctx.sessionId, kind, payloadKey(kind, payload))
+  if (existing) {
+    return {
+      ok: true,
+      proposalId: existing,
+      status: 'pending',
+      duplicate: true,
+      hint: '同样的建议已经在等待用户确认，不要重复提交。'
+    }
+  }
+  if (ctx.run.proposalIds.length >= MAX_PROPOSALS_PER_TURN) {
+    return { ok: false, reason: 'too_many_proposals', hint: '一轮最多提出 3 条建议，等用户处理完再说。' }
+  }
+  const info = db
+    .prepare('INSERT INTO chat_proposals (user_id, session_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(ctx.userId, ctx.sessionId, kind, JSON.stringify(payload), new Date().toISOString())
+  ctx.run.proposalIds.push(info.lastInsertRowid)
+  return { ok: true, proposalId: info.lastInsertRowid, status: 'pending', hint: '已提交给用户确认，尚未写入。' }
+}
+
+function proposeFact(ctx, args) {
+  const content = normText(args?.content, 500)
+  if (!content) return { ok: false, reason: 'bad_args', hint: '事实内容需为 1-500 字的文本' }
+
+  const confidence = Number(args?.confidence)
+  const conf = Number.isInteger(confidence) && confidence >= 1 && confidence <= 5 ? confidence : 3
+
+  const dup = db.prepare('SELECT id FROM facts WHERE user_id = ? AND content = ?').get(ctx.userId, content)
+  if (dup) {
+    return { ok: false, reason: 'already_exists', factId: dup.id, hint: '这条事实已经在记忆里了，不需要再提。' }
+  }
+  return insertProposal(ctx, 'fact', { content, confidence: conf })
+}
+
+function proposeTag(ctx, args) {
+  const recordId = Number(args?.recordId)
+  if (!Number.isInteger(recordId) || recordId <= 0) {
+    return { ok: false, reason: 'bad_args', hint: 'recordId 需要是正整数' }
+  }
+  const record = db.prepare('SELECT id, day FROM records WHERE id = ? AND user_id = ?').get(recordId, ctx.userId)
+  if (!record) {
+    return { ok: false, reason: 'not_found', hint: '没有找到这条记录，recordId 必须来自 get_days 或 get_record。' }
+  }
+  const tagType = TAG_TYPES.includes(args?.tagType) ? args.tagType : null
+  if (!tagType) {
+    return { ok: false, reason: 'bad_args', hint: 'tagType 必须是 insight/suggestion/pattern/correction 之一' }
+  }
+  const content = normText(args?.content, 500)
+  if (!content) return { ok: false, reason: 'bad_args', hint: '标签内容需为 1-500 字的文本' }
+
+  return insertProposal(ctx, 'tag', { recordId, recordDay: record.day, tagType, content })
+}
+
+function proposeReport(ctx, args) {
+  const periodType = args?.periodType === 'week' ? 'week' : args?.periodType === 'month' ? 'month' : null
+  if (!periodType) return { ok: false, reason: 'bad_args', hint: 'periodType 只能是 week 或 month' }
+
+  const start = args?.start ? String(args.start) : null
+  const end = args?.end ? String(args.end) : null
+  if ((start && !end) || (!start && end)) {
+    return { ok: false, reason: 'bad_args', hint: 'start 和 end 需要同时提供' }
+  }
+  if (start) {
+    if (!isDay(start) || !isDay(end)) return { ok: false, reason: 'bad_args', hint: '日期格式应为 YYYY-MM-DD' }
+    if (start > end) return { ok: false, reason: 'bad_args', hint: '起始日期不能晚于结束日期' }
+    if (dayDiff(start, end) > 366) return { ok: false, reason: 'bad_args', hint: '报告区间不能超过 366 天' }
+  }
+  if (ctx.run.reportCount >= 1) {
+    return { ok: false, reason: 'too_many_proposals', hint: '一轮最多提议一份报告。' }
+  }
+
+  const result = insertProposal(ctx, 'report', { periodType, start, end })
+  if (result.ok && !result.duplicate) ctx.run.reportCount += 1
+  return result
+}
+
 /**
  * 执行一个工具调用，返回可以直接塞进 role:"tool" 的字符串。
  * 结果过大时不返回半截数据，而是返回一个提示对象。
+ * ctx 可以是 userId（读工具兼容旧调用），也可以是 { userId, sessionId, run }。
  */
-export function executeTool(name, args, userId) {
+export function executeTool(name, args, ctx) {
+  const isContext = ctx && typeof ctx === 'object'
+  const userId = isContext ? ctx.userId : ctx
   let data
   try {
     if (name === 'get_days') data = getDays(userId, args)
     else if (name === 'get_tags') data = getTags(userId, args)
     else if (name === 'get_record') data = getRecord(userId, args)
     else if (name === 'get_report') data = getReport(userId, args)
-    else data = { ok: false, reason: 'unknown_tool', hint: '没有这个工具' }
+    else if (name === 'propose_fact' || name === 'propose_tag' || name === 'propose_report') {
+      if (!isContext || !ctx.sessionId || !ctx.run) {
+        data = { ok: false, reason: 'no_session', hint: '写入建议只能出现在对话里' }
+      } else if (name === 'propose_fact') data = proposeFact(ctx, args)
+      else if (name === 'propose_tag') data = proposeTag(ctx, args)
+      else data = proposeReport(ctx, args)
+    } else data = { ok: false, reason: 'unknown_tool', hint: '没有这个工具' }
   } catch (err) {
     data = { ok: false, reason: 'tool_error', hint: err.message }
   }

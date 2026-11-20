@@ -248,6 +248,29 @@ const migrations = [
       db.exec(`ALTER TABLE chat_messages ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0;`)
       db.exec(`ALTER TABLE chat_messages ADD COLUMN prompt_chars INTEGER NOT NULL DEFAULT 0;`)
     }
+  },
+  {
+    version: 8,
+    // Agent 写入提议：模型只提议，用户确认后才落库
+    up() {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_proposals (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          message_id INTEGER REFERENCES chat_messages(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('fact', 'tag', 'report')),
+          payload TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+          couple_visible INTEGER NOT NULL DEFAULT 0,
+          result_ref_id INTEGER,
+          created_at TEXT NOT NULL,
+          decided_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_proposals_message ON chat_proposals(message_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_proposals_session ON chat_proposals(session_id, status);
+      `)
+    }
   }
 ]
 

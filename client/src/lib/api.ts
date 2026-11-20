@@ -110,11 +110,32 @@ export type ChatSession = {
   updatedAt: string
 }
 
+export type ChatProposal = {
+  id: number
+  kind: 'fact' | 'tag' | 'report'
+  status: 'pending' | 'accepted' | 'rejected'
+  payload: {
+    content?: string
+    confidence?: number
+    recordId?: number
+    recordDay?: string
+    tagType?: RecordTag['tagType']
+    periodType?: 'week' | 'month'
+    start?: string | null
+    end?: string | null
+  } | null
+  coupleVisible: boolean
+  resultRefId?: number | null
+  createdAt: string
+  decidedAt?: string | null
+}
+
 export type ChatMessage = {
   id: number
   role: 'user' | 'assistant' | 'system'
   content: string
   refs?: { id: number; type: string; content?: string }[] | null
+  proposals?: ChatProposal[]
   createdAt: string
 }
 
@@ -217,5 +238,14 @@ export const api = {
     request<{ userMessage: ChatMessage; assistantMessage: ChatMessage; usage?: { total_tokens: number } }>(
       `/chat/sessions/${sessionId}/messages`,
       { method: 'POST', body: JSON.stringify(body) }
-    )
+    ),
+
+  // ---- agent 写入提议 ----
+  acceptProposal: (id: number, coupleVisible = false) =>
+    request<{
+      proposal: ChatProposal
+      action?: { type: string; scope: string; periodType: 'week' | 'month'; start?: string | null; end?: string | null }
+    }>(`/proposals/${id}/accept`, { method: 'POST', body: JSON.stringify({ coupleVisible }) }),
+  rejectProposal: (id: number) =>
+    request<{ proposal: ChatProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
 }
