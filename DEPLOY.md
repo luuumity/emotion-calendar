@@ -113,6 +113,24 @@ chmod 600 /opt/emotion-calendar/.env.production
 - `COOKIE_SECURE=1`：登录 Cookie 只走 HTTPS。**必须等第 8 步证书生效后再打开**，否则登录会失败。
 - `JWT_SECRET_FILE` 不存在时会自动生成，备份 `data/` 时会一起备份。
 
+**AI 能力（可选）**：不配置时所有 AI 接口返回占位文本，界面仍可正常使用。
+
+```bash
+cat >> /opt/emotion-calendar/.env.production <<'EOF'
+DEEPSEEK_API_KEY=sk-...
+# 可选，默认 deepseek-v4-flash；deepseek-chat / deepseek-reasoner 已弃用
+DEEPSEEK_MODEL=deepseek-v4-flash
+# 可选，默认 https://api.deepseek.com
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+EOF
+systemctl restart emotion-calendar
+```
+
+说明：
+
+- 聊天与报告恒定声明服务端工具 `deepseek_read_url`（模型可自行读取消息里的链接，不按次计费、只算 token）。
+- 链接与抓取到的正文会经过模型服务商，属于既有隐私边界的一部分。
+
 `.env.production` 和 `data/` 都已在 `.gitignore` 里，不会进仓库。
 
 ## 6. 配置 systemd

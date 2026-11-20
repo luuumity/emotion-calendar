@@ -9,6 +9,9 @@
 - **月视图**：日期色块、我的/对方双色对照、本月情绪曲线、同感指数与趋势。
 - **日视图（扭蛋机）**：Matter.js 真实物理，拖动色块投进玻璃罩，扭蛋下落并与已有扭蛋碰撞；点击任意扭蛋可查看/编辑当天的理由。
 - **隐私与授权**：默认完全隔离。生成凭证时可选择「仅颜色」或「颜色 + 理由」；对方兑换后只读访问，随时可撤销。
+- **AI 分析**：单人报告手动生成、双人报告需双方互惠 full 档授权；报告按周期落库、不回溯重算，含增量水位。
+- **聊一聊**：persona agent 基于自己的记录、标签、facts 与历史报告对话，会话可新建/删除；消息里的链接可由模型自行读取。
+- **分值微调**：选中扭蛋后可滑杆/步进微调分数，保留「已调过」标记。
 - **账号体系**：用户名 + 密码，HttpOnly Cookie 会话，数据按用户隔离。
 - **每日提醒**：可选的 Web Push 通知，当天没记录时在设定时间提醒；支持「添加到主屏幕」后的独立窗口与 iOS 推送。
 
@@ -25,10 +28,11 @@
 
 ```
 client/          前端（Vite）
-  src/pages/     月视图 / 日视图 / 授权管理 / 登录
+  src/pages/     月视图 / 日视图 / AI 分析 / 聊一聊 / 设置 / 登录
   src/components/GachaMachine.tsx 扭蛋机物理画布
 server/          后端（Express + SQLite）
-  src/routes/    auth / records / access
+  src/routes/    auth / records / access / facts / tags / insights / chat
+  src/lib/       llm / persona / privacy / incremental / prompts
 Dockerfile
 docker-compose.yml
 ```

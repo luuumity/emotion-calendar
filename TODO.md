@@ -2,6 +2,36 @@
 
 产品与体验待办。运维/备份待办见 [OSS-TODO.md](./OSS-TODO.md)。
 
+## 当前实现状态（2026-11-20 核对）
+
+代码、GitHub `main`、服务器三者一致（`4c1b69b`），服务 `active`。
+
+| 模块 | 状态 | 说明 |
+|---|---|---|
+| 数据库迁移 v5 | 已完成 | facts / record_tags / insights / couple_memory / chat_sessions / chat_messages |
+| 分值微调（后端） | 已完成 | `PUT /api/records/:id` 接受 score；original_score / adjusted_at |
+| 分值微调（前端） | 已完成 | 滑杆 + −/+，「已调过」标记；**无 5 秒撤销** |
+| AI 分析页（单人/双人手动生成） | 已完成 | `/insights`；双人入口按互惠 full 档置灰 |
+| 聊一聊 | 已完成 | 会话新建/删除、自动标题（首条前 30 字） |
+| AI 标签展示 | 已完成 | 日视图展示；**agent 写入标签未做** |
+| `deepseek_read_url` | 已完成 | 聊天与报告恒定声明，只计 token；报告 prompt 已改为 system + user |
+| 模型 | 已完成 | 默认 `deepseek-v4-flash`（`deepseek-chat` 已于 2026-07-24 弃用） |
+| 定时报告 / 每日聚合 | 未做 | cron 入口仍注释，未接调度 |
+| §3 私密记录 `is_private` | 未做 | 当前裁剪只按 `couple_visible` + scope |
+| Facts 设置页 | 暂缓 | 用户决定"不想搞得太 IT" |
+| sources 落库 | 未做 | 表字段已留，未解析引用 |
+| 会话标题模型生成 | 未做 | 现用首条消息前 30 字 |
+| 链接 chip 识别 | 未做 | 方案已定：单框 + 派生 chip，软上限 3 |
+| `/share` 落地页 + share_target | 未做 | 方案已定：5 色球 + 预填链接；后端无需改 |
+| 双人阶段二 fork 对谈 | 未做 | 目前是阶段一双 persona 单调用 |
+| AI 设置页（联网开关等） | 未做 | `read_url` 恒定开启，无开关 |
+
+已定的产品约定（避免重复讨论）：
+
+- 链接**不在写入时抓取**；报告读不到链接时只依据用户写的理由，不得编造
+- 分享入口是**独立路由**而非弹窗；note 预填分享标题 + 链接
+- 联网能力只按 token 计费，预算按 token 控制
+
 ## 待做
 
 ### 1. 选中扭蛋后微调分值/颜色
@@ -14,7 +44,8 @@
 - [ ] 文案：「颜色和分值创建后不能改」改为「色块只负责新建，选中后可微调」
 - [ ] 待定：是否保留「已调整」标记或原始分值
 - [ ] 设计约束：保留「点色块 = 新建」；调整必须是选中后的显式操作
-- [x] 服务端（2026-11-19 完成，未部署、前端未接）：`PUT /api/records/:id` 接受 `score`（0–100 整数、仅本人、不限时间范围）；迁移 v3 新增 `original_score`（首次调整前分值，只写一次）与 `adjusted_at`（最近一次调整时间）；同分值重复提交幂等；共享视图不下发修订字段
+- [x] 服务端（2026-11-19 完成）：`PUT /api/records/:id` 接受 `score`（0–100 整数、仅本人、不限时间范围）；迁移 v3 新增 `original_score`（首次调整前分值，只写一次）与 `adjusted_at`（最近一次调整时间）；同分值重复提交幂等；共享视图不下发修订字段
+- [x] 前端（2026-11-20 完成并上线）：选中后滑杆 + −/+ 微调，实时变色，显示「已调过」；5 秒撤销未实现
 
 ### 2. AI 分析（单人 + 双人）
 
@@ -296,32 +327,33 @@ couple_memory 存的是**阶段一双人报告的增量水位 + 压缩记忆**�
 | 成本 | 低 | 高 |
 | 实施顺序 | 先写，和 facts 同阶段 | 有了实际数据再评估 |
 
-#### 2.9 联网检索与模型选型（2026-11-19 调研）
+#### 2.9 联网检索与模型选型（2026-11-20 修正）
 
-DeepSeek API 现有三条联网路径：
+**当前实现**：聊天与报告都恒定声明 `deepseek_read_url`（见 `server/src/lib/llm.js`），模型自行决定是否读取最后一条 user 消息里的链接；不按次收费，只计 token。报告 prompt 已从 system-only 改为 system + user，记录段（含理由里的链接）放在 user 消息里。
+
+DeepSeek API 现存的联网路径（本项目只用到第一条）：
 
 | 方式 | 模型 | 触发方 | 计费 |
 |------|------|--------|------|
-| 联网工具 `deepseek_web_search` / `deepseek_read_url` | deepseek-flash | 模型自判 | 2026-11-18 12:00 起工具调用免费，结果按 token 计 |
-| Responses API 的 `web_search` | 仅 deepseek-v4-pro（flash 忽略） | 模型自判 | 同上 |
-| 独立 Search / Fetch API | 任意 | 我们代码控制 | 按次 ¥5 / 1000 次 |
+| 联网工具 `deepseek_web_search` / `deepseek_read_url` | v4-flash | 模型自判 | 工具调用免费，内容按 token 计 |
+| 独立 Search / Fetch API | 任意 | 我们代码控制 | 按次 ¥5 / 1000 次成功请求 |
 
-模型价：flash 输入（缓存未命中）¥2/M、输出 ¥8/M；v4-pro ¥9/M、¥27/M。周一至周五 9–12、14–18 为高峰，其余（含周末与法定节假日全天）为空闲半价——分析任务放深夜跑即享空闲价。
+模型价（2026-11-20 官方价格页）：`deepseek-v4-flash` 输入 ¥1/M（缓存命中 ¥0.02/M）、输出 ¥2/M；`deepseek-v4-pro` ¥3/M、¥6/M。旧版的"高峰/空闲半价"未在新价格页出现，按已取消对待。
 
-**结论与约束**
+**已定结论**
 
-- [ ] 模型选 `deepseek-flash`：官方建议联网工具配 flash，且价格最低
-- [ ] 联网默认关闭，作为 AI 设置中的可选项（如「允许联网查证梗与节目」），由用户自行打开
-- [ ] 开启时用非思考模式，避免「深度思考搜索」最多约 20 次工具调用的开销
-- [ ] 提示词禁止搜索个人信息：真实姓名、公司、地址、账号等一律不得进入检索词
-- [ ] 提示词约束：只使用与情绪背景直接相关的检索结果，查不到就明说「不确定」，不强行关联
-- [ ] 结果落库带 sources（引用 URL + 标题 + 生成时间），前端以小角标展示依据
-- [ ] 承认不可复现：同一批历史在不同时间重跑，检索结果与结论可能漂移；已落库的 insights 以当时 sources 为准
-- [ ] 成本不构成瓶颈（周分析数万 token，空闲价约几分钱），真正的成本是隐私边界与一致性
+- [x] 默认模型 `deepseek-v4-flash`，可用 `DEEPSEEK_MODEL` 覆盖；`deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 弃用
+- [x] `read_url` 恒定开启，不做用户开关（2026-11-20 决定）
+- [x] 不做写入时抓取，不为记录增加 link 字段；链接留在理由原文里
+- [ ] 暂不接入 Search / Fetch API（按次计费，且与 token 预算口径不一致）
+- [ ] sources 暂不落库：`read_url` 不回传引用，`insights.sources` 字段保留但为空
+- [ ] 单次最多读 10 个不同 URL，由模型取舍；"恒定能力"只保证声明，不保证每次执行
+- [ ] 报告接口同步返回，读多个链接会明显变慢，需实测是否触发代理超时；必要时改为异步生成
+- [ ] 隐私：链接与抓取到的正文都会经过模型服务商，需在设置页说明
+- [ ] 提示词约束：读不到链接时只依据用户写下的理由，不得编造内容
 
 参考文档：
 - [联网工具](https://api-docs.deepseek.com/zh-cn/guides/web_tools)
-- [使用 Responses API](https://api-docs.deepseek.com/zh-cn/guides/responses_api/)
 - [网页搜索与抓取](https://api-docs.deepseek.com/zh-cn/guides/search/)
 - [模型 & 价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
