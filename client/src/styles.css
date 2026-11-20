@@ -2633,6 +2633,31 @@ p {
 .chat-page {
   display: flex;
   flex-direction: column;
+  height: calc(100dvh - 64px); /* 顶栏 nav 约 64px */
+  overflow: hidden;
+  animation: none;
+  padding: 0;
+  gap: 0;
+}
+
+/* chat 页面撑满 app-main，不需要通用 padding */
+.app-main:has(.chat-page) {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.chat-page > .page-head {
+  padding: 14px 22px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.chat-page > .page-head .sub {
+  display: none; /* 聊一聊页标题下方的描述藏掉，让页面紧凑 */
 }
 
 .chat-sidebar-toggle {
@@ -2642,8 +2667,10 @@ p {
 .chat-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  gap: 18px;
-  min-height: calc(100vh - 220px);
+  gap: 0;
+  flex: 1;
+  min-height: 0; /* 关键：让子元素 overflow 生效 */
+  height: 0; /* 配合 flex:1 撑满 */
 }
 
 .chat-session-list {

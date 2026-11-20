@@ -19,6 +19,7 @@ export function ChatPage() {
   const [input, setInput] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [hint, setHint] = useState<string | null>(null)
 
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -47,6 +48,17 @@ export function ChatPage() {
   }
 
   async function createAndSelect() {
+    // 如果已经有一个还没发过消息的空会话，直接切过去，不重复建
+    const existingEmpty = sessions.find((s) => s.messageCount === 0)
+    if (existingEmpty) {
+      if (existingEmpty.id !== activeId) {
+        await selectSession(existingEmpty.id)
+      }
+      setHint('已在新会话中')
+      setTimeout(() => setHint(null), 1600)
+      setSidebarOpen(false)
+      return
+    }
     try {
       const res = await api.createChatSession('新对话')
       setSessions((prev) => [res.session, ...prev])
@@ -59,32 +71,15 @@ export function ChatPage() {
     }
   }
 
-  async function deleteSession(id: number) {
-    if (!confirm('删除这个对话？（不可恢复）')) return
-    try {
-      await api.deleteChatSession(id)
-      const next = sessions.filter((s) => s.id !== id)
-      setSessions(next)
-      if (activeId === id) {
-        const fallback = next[0]?.id ?? null
-        setActiveId(fallback)
-        if (fallback) {
-          const res = await api.chatMessages(fallback)
-          setMessages(res.messages)
-        } else {
-          setMessages([])
-        }
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '删除失败')
-    }
-  }
-
-  // 初始加载
+  // 初始加载：拉列表，如果没有任何 session 就自动建一个空的新会话
   useEffect(() => {
     ;(async () => {
       const list = await loadSessions()
-      if (list.length > 0) {
+      if (list.length === 0) {
+        const res = await api.createChatSession('新对话')
+        setSessions([res.session])
+        setActiveId(res.session.id)
+      } else {
         await selectSession(list[0].id)
       }
     })()
@@ -120,12 +115,16 @@ export function ChatPage() {
         const replaced = prev.map((m) => (m.id === optimisticUser.id ? res.userMessage : m))
         return [...replaced, res.assistantMessage]
       })
-      // 更新 session 列表里的 messageCount 和顺序
       setSessions((prev) => {
-        return prev
-          .map((s) => (s.id === activeId ? { ...s, messageCount: s.messageCount + 1, updatedAt: new Date().toISOString() } : s))
-          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        // 如果后端自动更新了 title（第一次发消息），重新拉一下 session 更稳
+        const updated = prev.map((s) =>
+          s.id === activeId ? { ...s, messageCount: s.messageCount + 1, updatedAt: new Date().toISOString() } : s
+        )
+        return updated.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       })
+      // 第一次发消息后，后端会自动把 title 设成用户 query；重新拉一下列表拿到新 title
+      const latestList = await api.chatSessions()
+      setSessions(latestList.sessions)
     } catch (e) {
       setError(e instanceof Error ? e.message : '发送失败')
       // 移除假的 user 消息
@@ -136,6 +135,7 @@ export function ChatPage() {
   }
 
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
+  const nonEmptySessions = useMemo(() => sessions.filter((s) => s.messageCount > 0), [sessions])
 
   // 纯按钮触发发送。回车/Shift+回车都换行，符合移动端输入法直觉
   // （之前保留了 Shift+Enter=换行，Enter=发送的桌面规则；现在统一：点按钮才发）
@@ -147,30 +147,41 @@ export function ChatPage() {
           <h1>聊一聊</h1>
           <p className="sub">和懂你的 Persona Agent 聊聊吧——它读过你的情绪日记、标签和过往分析。</p>
         </div>
-        <button
-          type="button"
-          className="ghost-btn small chat-sidebar-toggle"
-          onClick={() => setSidebarOpen((v) => !v)}
-          aria-label="切换会话列表"
-        >
-          {sidebarOpen ? '收起' : '会话'}
-        </button>
+        <div className="chat-head-actions">
+          <button
+            type="button"
+            className="ghost-btn small"
+            onClick={createAndSelect}
+            title="新建对话"
+            aria-label="新建对话"
+          >
+            ＋ 新对话
+          </button>
+          <button
+            type="button"
+            className="ghost-btn small chat-sidebar-toggle"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label="切换会话列表"
+          >
+            {sidebarOpen ? '收起' : '会话'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
+      {hint && <div className="banner info">{hint}</div>}
 
       <div className="chat-layout">
         <aside className={'chat-session-list ' + (sidebarOpen ? 'open' : '')}>
           <div className="chat-session-head">
             <span className="chat-session-title">历史会话</span>
-            <button type="button" className="icon-btn small" onClick={createAndSelect} title="新建对话">+</button>
           </div>
 
           <div className="chat-sessions-scroll">
-            {sessions.length === 0 ? (
-              <p className="list-empty">还没有会话。</p>
+            {nonEmptySessions.length === 0 ? (
+              <p className="list-empty">还没有历史会话。</p>
             ) : (
-              sessions.map((s) => (
+              nonEmptySessions.map((s) => (
                 <div
                   key={s.id}
                   className={'chat-session-item ' + (s.id === activeId ? 'active' : '')}

@@ -152,6 +152,14 @@ router.post('/sessions/:id/messages', async (req, res) => {
   // 更新 session updated_at
   db.prepare('UPDATE chat_sessions SET updated_at = ? WHERE id = ?').run(now, id)
 
+  // 如果是第一次发消息，把标题设成用户第一句的前 30 字（替代默认"新对话"）
+  const firstMsg = db.prepare('SELECT COUNT(*) AS c FROM chat_messages WHERE session_id = ?').get(id).c
+  const sessionRow = db.prepare('SELECT title FROM chat_sessions WHERE id = ?').get(id)
+  if (firstMsg === 1 && (!sessionRow.title || sessionRow.title === '新对话')) {
+    const autoTitle = content.replace(/\s+/g, ' ').trim().slice(0, 30) || '新对话'
+    db.prepare('UPDATE chat_sessions SET title = ? WHERE id = ?').run(autoTitle, id)
+  }
+
   // 2. 取该 session 最近 N 轮作为历史（给模型看），但 system prompt 已覆盖 persona
   const history = db
     .prepare('SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 20')
