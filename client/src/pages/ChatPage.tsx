@@ -20,25 +20,23 @@ export function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hint, setHint] = useState<string | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
 
   const listRef = useRef<HTMLDivElement>(null)
-  const sidebarRef = useRef<HTMLElement | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const hintTimer = useRef<number | null>(null)
 
-  // 侧边栏打开时，点外面自动收起（遮罩）
+  function flashHint(message: string) {
+    setHint(message)
+    if (hintTimer.current) window.clearTimeout(hintTimer.current)
+    hintTimer.current = window.setTimeout(() => setHint(null), 1600)
+  }
+
   useEffect(() => {
-    if (!sidebarOpen) return
-    function onDocClick(e: MouseEvent) {
-      const t = e.target as Node
-      if (sidebarRef.current && !sidebarRef.current.contains(t)) {
-        const btn = document.querySelector('.chat-sidebar-toggle')
-        if (!btn || !btn.contains(t)) {
-          setSidebarOpen(false)
-        }
-      }
+    return () => {
+      if (hintTimer.current) window.clearTimeout(hintTimer.current)
     }
-    document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
-  }, [sidebarOpen])
+  }, [])
 
   async function loadSessions() {
     try {
@@ -71,8 +69,7 @@ export function ChatPage() {
       if (existingEmpty.id !== activeId) {
         await selectSession(existingEmpty.id)
       }
-      setHint('已在新会话中')
-      setTimeout(() => setHint(null), 1600)
+      flashHint('已在新会话中')
       setSidebarOpen(false)
       return
     }
@@ -90,9 +87,7 @@ export function ChatPage() {
 
   async function deleteSession(id: number, e?: React.MouseEvent) {
     e?.stopPropagation?.()
-    const target = sessions.find((s) => s.id === id)
-    if (!target) return
-    if (!confirm(`删除"${target.title}"这个对话？（不可恢复）`)) return
+    setPendingDeleteId(null)
     try {
       await api.deleteChatSession(id)
       const next = sessions.filter((s) => s.id !== id)
@@ -131,6 +126,14 @@ export function ChatPage() {
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, sending])
 
+  // 输入框随内容自动增高（最多 160px）
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
+  }, [input])
+
   async function send() {
     if (!activeId || sending) return
     const content = input.trim()
@@ -155,14 +158,7 @@ export function ChatPage() {
         const replaced = prev.map((m) => (m.id === optimisticUser.id ? res.userMessage : m))
         return [...replaced, res.assistantMessage]
       })
-      setSessions((prev) => {
-        // 如果后端自动更新了 title（第一次发消息），重新拉一下 session 更稳
-        const updated = prev.map((s) =>
-          s.id === activeId ? { ...s, messageCount: s.messageCount + 1, updatedAt: new Date().toISOString() } : s
-        )
-        return updated.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      })
-      // 第一次发消息后，后端会自动把 title 设成用户 query；重新拉一下列表拿到新 title
+      // 首次发消息后后端会自动生成标题、messageCount 也会变，直接以服务端为准
       const latestList = await api.chatSessions()
       setSessions(latestList.sessions)
     } catch (e) {
@@ -182,8 +178,9 @@ export function ChatPage() {
 
   return (
     <div className="page chat-page">
-      <div className="page-head">
-        <div className="chat-head-left">
+      <div className="page-head chat-head">
+        <h1 className="chat-title-inline">聊一聊</h1>
+        <div className="chat-toolbar">
           <button
             type="button"
             className="ghost-btn small chat-sidebar-toggle"
@@ -192,12 +189,9 @@ export function ChatPage() {
           >
             {sidebarOpen ? '收起' : '会话列表'}
           </button>
-          <h1 className="chat-title-inline">聊一聊</h1>
-        </div>
-        <div className="chat-head-right">
           <button
             type="button"
-            className="ghost-btn small"
+            className="ghost-btn small chat-new-btn"
             onClick={createAndSelect}
             title="新建对话"
             aria-label="新建对话"
@@ -214,7 +208,7 @@ export function ChatPage() {
         {sidebarOpen && (
           <div className="chat-sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden />
         )}
-        <aside ref={sidebarRef} className={'chat-session-list ' + (sidebarOpen ? 'open' : '')}>
+        <aside className={'chat-session-list ' + (sidebarOpen ? 'open' : '')}>
           <div className="chat-session-head">
             <span className="chat-session-title">历史会话</span>
           </div>
@@ -236,15 +230,40 @@ export function ChatPage() {
                     <strong>{s.title}</strong>
                     <span>{formatTime(s.updatedAt)}</span>
                   </div>
-                  <button
-                    type="button"
-                    className="chat-session-del"
-                    title="删除这个对话"
-                    aria-label="删除这个对话"
-                    onClick={(e) => deleteSession(s.id, e)}
-                  >
-                    🗑
-                  </button>
+                  {pendingDeleteId === s.id ? (
+                    <div className="chat-session-confirm" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="chat-session-confirm-yes"
+                        onClick={(e) => deleteSession(s.id, e)}
+                      >
+                        删除
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-session-confirm-no"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setPendingDeleteId(null)
+                        }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="chat-session-del"
+                      title="删除这个对话"
+                      aria-label="删除这个对话"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setPendingDeleteId(s.id)
+                      }}
+                    >
+                      🗑
+                    </button>
+                  )}
                 </div>
               ))
             )}
@@ -283,6 +302,7 @@ export function ChatPage() {
 
               <footer className="chat-input-area">
                 <textarea
+                  ref={inputRef}
                   className="chat-input"
                   rows={1}
                   placeholder="说点什么…"

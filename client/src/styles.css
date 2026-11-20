@@ -2633,57 +2633,60 @@ p {
 .chat-page {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - 64px); /* 顶栏 nav 约 64px */
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   animation: none;
-  padding: 0;
-  gap: 0;
 }
 
-/* chat 页面撑满 app-main，不需要通用 padding */
+/* 聊一聊页独占视口：隐藏页脚，app-main 承接剩余高度 */
+.app-shell:has(.chat-page) {
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app-shell:has(.chat-page) .app-footer {
+  display: none;
+}
+
 .app-main:has(.chat-page) {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
+  min-height: 0;
 }
 
-.chat-page > .page-head {
-  padding: 14px 22px;
+/* 头部两行：标题一行，工具条一行 */
+.chat-head {
+  padding: 14px 22px 12px;
   margin: 0;
   border-bottom: 1px solid var(--line);
   background: var(--bg);
   flex-shrink: 0;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 14px;
-}
-
-.chat-head-left {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-
-.chat-head-left > button {
-  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
 .chat-title-inline {
   margin: 0;
-  font-size: 17px;
-  flex-shrink: 0;
+  font-size: 19px;
+  line-height: 1.2;
 }
 
-.chat-head-right {
+.chat-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  justify-content: space-between;
+}
+
+.chat-new-btn {
+  margin-left: auto;
 }
 
 /* 侧边栏弹层的遮罩 */
@@ -2736,36 +2739,12 @@ p {
   color: var(--ink-faint);
 }
 
-.chat-session-new {
-  margin: 4px 12px 10px;
-  padding: 10px 12px;
-  border: 1px dashed var(--line-strong);
-  background: #fbf8f1;
-  border-radius: 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.chat-session-new:hover {
-  border-color: rgba(242, 112, 95, 0.55);
-  background: #fdf1ec;
-}
-
-.chat-session-new.active {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: #fff9f0;
-  font-weight: 700;
-}
-
 .chat-sessions-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 4px 8px 12px;
   display: grid;
+  align-content: start;
   gap: 2px;
 }
 
@@ -2777,8 +2756,6 @@ p {
   border-radius: 10px;
   cursor: pointer;
   transition: background 0.15s ease;
-  position: relative;
-  min-height: 0;
 }
 
 .chat-session-item:hover {
@@ -2811,7 +2788,7 @@ p {
 }
 
 .chat-session-del {
-  opacity: 0;
+  opacity: 0.45;
   border: none;
   background: transparent;
   color: var(--ink-faint);
@@ -2823,6 +2800,7 @@ p {
   place-items: center;
   cursor: pointer;
   transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .chat-session-item:hover .chat-session-del,
@@ -2835,35 +2813,50 @@ p {
   color: var(--coral-deep);
 }
 
+/* 内联删除确认，替代原生 confirm */
+.chat-session-confirm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chat-session-confirm-yes,
+.chat-session-confirm-no {
+  border: none;
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-session-confirm-yes {
+  background: rgba(196, 71, 58, 0.12);
+  color: var(--coral-deep);
+}
+
+.chat-session-confirm-yes:hover {
+  background: var(--coral-deep);
+  color: #fff9f0;
+}
+
+.chat-session-confirm-no {
+  background: rgba(47, 42, 37, 0.06);
+  color: var(--ink-soft);
+}
+
+.chat-session-confirm-no:hover {
+  background: rgba(47, 42, 37, 0.12);
+}
+
 /* 聊天主窗口 */
 .chat-window {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
   min-height: 0;
-}
-
-.chat-window-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 22px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(251, 248, 241, 0.55);
-}
-
-.chat-window-head strong {
-  font-size: 14.5px;
-  font-weight: 700;
-}
-
-.chat-window-head span {
-  font-size: 11.5px;
-  color: var(--ink-faint);
 }
 
 .chat-messages {
@@ -2988,11 +2981,6 @@ p {
   gap: 12px;
   padding: 40px 24px;
   text-align: center;
-}
-
-.chat-empty h3 {
-  font-size: 16px;
-  margin-bottom: 4px;
 }
 
 .chat-empty p {
