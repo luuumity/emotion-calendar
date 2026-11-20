@@ -1,13 +1,35 @@
 // 会话压缩：把过长的历史压成滚动摘要
-// 策略：未压缩消息超过 MAX_RAW 时，把最早的一批压进 summary，只保留最近 KEEP_RECENT 条原文
+// 策略：未压缩历史的估算 token 超过 HISTORY_TOKEN_LIMIT 时，把最早的一批压进 summary，只保留最近 KEEP_RECENT 条原文
+// token 估算用上一次回答的实测 usage 校准（prompt_tokens / prompt_chars），无数据时退回中文字符比 1.5
 // 失败降级：压缩调用失败就退回「只截断不摘要」，不影响本轮对话
 
 import { db } from '../db.js'
 import { callDeepSeek, hasDeepSeekKey } from './llm.js'
 
-const MAX_RAW = 12      // 未压缩消息上限（含 user + assistant）
-const KEEP_RECENT = 6   // 压缩后保留的最近原文条数
+const HISTORY_TOKEN_LIMIT = 1500  // 未压缩历史的估算 token 上限
+const MAX_PENDING = 24            // 兜底：超短消息堆积时也能触发
+const KEEP_RECENT = 6             // 压缩后保留的最近原文条数
 const SUMMARY_LIMIT = 1200
+const DEFAULT_TOKENS_PER_CHAR = 1 / 1.5
+
+function charsOf(row) {
+  return String(row.content || '').length
+}
+
+/** 用上一次回答的实测 usage 估算 tokens/char，异常时退回默认值 */
+function calibrateRatio(sessionId) {
+  const last = db
+    .prepare(
+      `SELECT prompt_tokens, prompt_chars FROM chat_messages
+       WHERE session_id = ? AND role = 'assistant' AND prompt_tokens > 0 AND prompt_chars > 0
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(sessionId)
+  if (!last) return DEFAULT_TOKENS_PER_CHAR
+  const ratio = last.prompt_tokens / last.prompt_chars
+  if (!Number.isFinite(ratio)) return DEFAULT_TOKENS_PER_CHAR
+  return Math.min(1.2, Math.max(0.3, ratio))
+}
 
 function transcriptOf(rows) {
   return rows
@@ -41,7 +63,14 @@ export async function ensureCompressed(sessionId) {
     )
     .all(sessionId, untilId)
 
-  if (pending.length <= MAX_RAW) return { summary, untilId }
+  const pendingChars = pending.reduce((n, m) => n + charsOf(m), 0)
+  const ratio = calibrateRatio(sessionId)
+  const pendingTokens = Math.round(pendingChars * ratio)
+  if (pendingTokens <= HISTORY_TOKEN_LIMIT && pending.length <= MAX_PENDING) {
+    return { summary, untilId }
+  }
+  // 条数不足以切出旧轮次时先不压，等历史继续增长
+  if (pending.length <= KEEP_RECENT) return { summary, untilId }
   // 没有 key 时不让占位文本变成摘要
   if (!hasDeepSeekKey()) return { summary, untilId, degraded: true }
 

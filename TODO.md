@@ -508,8 +508,8 @@ Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，
 被动注入的固定策略容易过时，改为「少量稳定上下文 + 按需取数」：
 
 - 常驻只保留：system、facts、近 14 天记录摘要、最近一份报告摘要、压缩摘要
-- 只读工具：`get_days(start,end)`、`get_day(date)`、`search_records(query,start,end)`、`list_reports(scope,limit)`、`get_report(id)`
-- 限制：单轮最多 3 次工具调用；单次结果 ≤2k tokens；超出由工具侧截断
+- 只读工具（已实现）：`get_days(start,end)`、`get_tags(start,end)`、`get_record(id)`、`get_report(id?)`
+- 限制：单次结果 > 6000 字符不返回半截数据，返回 `result_too_large` 提示让模型缩小范围；单次跨度 ≤90 天、≤60 条；相同参数重复调用拒绝；`MAX_TOOL_STEPS=8` 仅作熔断，不做轮次产品限制
 - 冷启动（无 facts、无报告）：允许模型先 `get_days` 读全量，或提出"生成一份从开始到现在的报告"
 - 报告生成不走工具：周期固定、需要确定性，直接注入记录
 
@@ -534,11 +534,11 @@ propose_report({ start, end })
 
 只压对话，不压数据——数据在库里，按需再取，不驻留上下文。
 
-- 触发：真实历史 > 12 条 **或** 估算 tokens > 1500（中文按 字符数/1.5 估）
-- 方式：保留最近 6 轮原文，更早的做增量摘要：`旧摘要 + 被挤出轮次 → 新摘要`
+- 触发：未压缩历史的估算 tokens > 1500（用上次回答实测 `prompt_tokens / prompt_chars` 校准比例，默认 字符数/1.5，clamp 到 [0.3,1.2]）；超短消息堆积 > 24 条兜底
+- 方式：保留最近 6 条原文，更早的做增量摘要：`旧摘要 + 被挤出轮次 → 新摘要`
 - 落库：`chat_sessions.summary` + `summary_until_message_id` + `summary_prompt_version`
 - 失败降级：摘要调用失败则退回纯截断，标记 `degraded`，不影响本轮回复
-- 执行时机：回复返回后异步执行；若上次未完成，下次请求前同步补做
+- 执行时机：本轮写入用户消息**之前**同步执行（否则本轮会被误压进摘要）；并发用 `UPDATE ... WHERE summary_until_id = 旧值` 条件更新防回退
 
 **预算（2026-11-20 定）**
 
@@ -550,7 +550,7 @@ propose_report({ start, end })
 | facts | 30 条 × 120 字 |
 | 最近一份报告摘要 | 400 tokens |
 | 压缩摘要 | 400 tokens |
-| 真实历史 | 1500 tokens / 12 条 |
+| 真实历史 | 1500 tokens（最多回放 12 条，每条 ≤2000 字） |
 | 单次工具结果 | 2k tokens |
 
 超出总预算时按此顺序砍：旧历史 → 工具结果 → facts → 报告摘要。system 永不截断。
@@ -610,7 +610,8 @@ propose_report({ start, end })
 
 - [x] P0：改 messages 结构（历史出 system、真实 role、稳定前缀）—— `46610c6`
 - [x] P2a：会话压缩摘要（v6 迁移、滚动摘要、失败降级）—— `974e8cd`，实测通过
-- [x] P1：主动读工具 + 工具循环 + 上限 —— `39fc7a6`，实测通过（`get_days` / `get_tags`，结果 > 6000 字符返回提示、相同参数重复调用拒绝、上限 8 步仅作熔断）
+- [x] P1：主动读工具 + 工具循环 + 上限 —— `39fc7a6`；后补齐 `get_record(id)` / `get_report(id?)`（权限按本人 + 参与的双人报告），实测通过（结果 > 6000 字符返回提示、相同参数重复调用拒绝、8 步熔断）
+- [x] P1b：压缩触发从「12 条」改为「历史估算 token > 1500」，用实测 usage 校准比例；v7 迁移记录 `prompt_tokens/prompt_chars`，供校准与成本统计
 - [ ] P2b：`couple_memory` 真摘要（现在是截取报告开头）
 - [ ] P3：写协议（proposal 工具 + 确认接口 + 三类落库）
 - [ ] P4：流式输出 + run 生命周期（断线补全）

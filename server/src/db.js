@@ -240,6 +240,14 @@ const migrations = [
       db.exec(`ALTER TABLE chat_sessions ADD COLUMN summary TEXT NOT NULL DEFAULT '';`)
       db.exec(`ALTER TABLE chat_sessions ADD COLUMN summary_until_id INTEGER NOT NULL DEFAULT 0;`)
     }
+  },
+  {
+    version: 7,
+    // 记录每次回答末次请求的 prompt 规模，用于校准 token 估算与成本统计
+    up() {
+      db.exec(`ALTER TABLE chat_messages ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0;`)
+      db.exec(`ALTER TABLE chat_messages ADD COLUMN prompt_chars INTEGER NOT NULL DEFAULT 0;`)
+    }
   }
 ]
 

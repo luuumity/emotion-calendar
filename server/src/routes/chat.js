@@ -197,12 +197,16 @@ async function runWithTools(baseMessages, userId) {
   const work = [...baseMessages]
   const seen = new Set()
   let usage = {}
+  let lastPromptTokens = 0
+  let lastPromptChars = 0
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+    lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
     const result = await callDeepSeek(work, { functions: FUNCTION_TOOLS })
     usage = mergeUsage(usage, result.usage)
+    lastPromptTokens = result.usage?.prompt_tokens || lastPromptTokens
 
-    if (!result.toolCalls) return { content: result.content, usage }
+    if (!result.toolCalls) return { content: result.content, usage, lastPromptTokens, lastPromptChars }
 
     const assistantMsg = { role: 'assistant', content: result.message.content ?? '', tool_calls: result.toolCalls }
     // 思考模式下，带 tool_calls 的 assistant 消息必须把 reasoning_content 原样带回去
@@ -237,9 +241,11 @@ async function runWithTools(baseMessages, userId) {
   }
 
   // 步数用尽：不再提供任何工具，强制基于已有信息收尾
+  lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
   const final = await callDeepSeek(work, { tools: false })
   usage = mergeUsage(usage, final.usage)
-  return { content: final.content, usage }
+  lastPromptTokens = final.usage?.prompt_tokens || lastPromptTokens
+  return { content: final.content, usage, lastPromptTokens, lastPromptChars }
 }
 
 router.post('/sessions/:id/messages', async (req, res) => {
@@ -290,7 +296,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
     .all(id, compressed.untilId, userInfo.lastInsertRowid)
     .reverse()
     .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 800) }))
+    .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 2000) }))
 
   // 3. 稳定块 / 事实 / 记忆块 / 压缩摘要
   const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(req.user.id)?.display_name || '用户'
@@ -315,8 +321,10 @@ router.post('/sessions/:id/messages', async (req, res) => {
 
     // 5. 存 assistant 回复
     const assistantInfo = db
-      .prepare('INSERT INTO chat_messages (session_id, role, content, refs, created_at) VALUES (?, ?, ?, NULL, ?)')
-      .run(id, 'assistant', result.content, nowIso())
+      .prepare(
+        'INSERT INTO chat_messages (session_id, role, content, refs, prompt_tokens, prompt_chars, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?)'
+      )
+      .run(id, 'assistant', result.content, result.lastPromptTokens, result.lastPromptChars, nowIso())
 
     // 6. 返回
     const assistantMsg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(assistantInfo.lastInsertRowid)

@@ -60,6 +60,34 @@ export const FUNCTION_TOOLS = [
         required: ['start', 'end']
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_record',
+      description: '读取某一条记录的完整内容（含未截断的理由）。当 get_days 返回 noteTruncated 时用它取全文。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: '记录编号，来自 get_days 返回的 id' }
+        },
+        required: ['id']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_report',
+      description:
+        '读取过往 AI 分析报告。不传 id 时返回最近的报告列表（编号、类型、周期、开头摘要）；传 id 时返回该报告全文。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'integer', description: '报告编号；省略则列出最近报告' }
+        }
+      }
+    }
   }
 ]
 
@@ -136,6 +164,73 @@ function getTags(userId, args) {
   return out
 }
 
+function getRecord(userId, args) {
+  const id = Number(args?.id)
+  if (!Number.isInteger(id) || id <= 0) {
+    return { ok: false, reason: 'bad_args', hint: 'id 需要是正整数' }
+  }
+  const r = db
+    .prepare('SELECT id, day, score, original_score, note, adjusted_at FROM records WHERE id = ? AND user_id = ?')
+    .get(id, userId)
+  if (!r) return { ok: false, reason: 'not_found', hint: '没有找到这条记录' }
+
+  const item = { id: r.id, day: r.day, score: r.score, note: String(r.note || '') }
+  if (r.original_score != null) item.originalScore = r.original_score
+  if (r.adjusted_at) item.adjustedAt = r.adjusted_at
+  return { ok: true, item }
+}
+
+function getReport(userId, args) {
+  const id = Number(args?.id)
+  // couple_key 是 "小id|大id"，用两端匹配确保只能读自己参与的双人报告
+  const coupleLikeA = `%|${userId}`
+  const coupleLikeB = `${userId}|%`
+  if (Number.isInteger(id) && id > 0) {
+    const r = db
+      .prepare(
+        `SELECT id, scope, period_type, period_start, period_end, content, generated_at FROM insights
+         WHERE id = ? AND (user_id = ? OR couple_key LIKE ? OR couple_key LIKE ?)`
+      )
+      .get(id, userId, coupleLikeA, coupleLikeB)
+    if (!r) return { ok: false, reason: 'not_found', hint: '没有找到这份报告' }
+    return {
+      ok: true,
+      report: {
+        id: r.id,
+        scope: r.scope,
+        periodType: r.period_type,
+        periodStart: r.period_start,
+        periodEnd: r.period_end,
+        generatedAt: r.generated_at,
+        content: String(r.content || '')
+      }
+    }
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT id, scope, period_type, period_start, period_end, content, generated_at
+       FROM insights WHERE user_id = ? OR couple_key LIKE ? OR couple_key LIKE ?
+       ORDER BY period_start DESC, id DESC LIMIT 5`
+    )
+    .all(userId, coupleLikeA, coupleLikeB)
+
+  return {
+    ok: true,
+    total: rows.length,
+    items: rows.map((r) => ({
+      id: r.id,
+      scope: r.scope,
+      periodType: r.period_type,
+      periodStart: r.period_start,
+      periodEnd: r.period_end,
+      generatedAt: r.generated_at,
+      preview: String(r.content || '').replace(/\s+/g, ' ').slice(0, 120)
+    })),
+    hint: '需要全文请再用 get_report 并传入 id'
+  }
+}
+
 /**
  * 执行一个工具调用，返回可以直接塞进 role:"tool" 的字符串。
  * 结果过大时不返回半截数据，而是返回一个提示对象。
@@ -145,6 +240,8 @@ export function executeTool(name, args, userId) {
   try {
     if (name === 'get_days') data = getDays(userId, args)
     else if (name === 'get_tags') data = getTags(userId, args)
+    else if (name === 'get_record') data = getRecord(userId, args)
+    else if (name === 'get_report') data = getReport(userId, args)
     else data = { ok: false, reason: 'unknown_tool', hint: '没有这个工具' }
   } catch (err) {
     data = { ok: false, reason: 'tool_error', hint: err.message }
