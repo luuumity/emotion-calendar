@@ -240,7 +240,11 @@ async function runWithTools(baseMessages, userId) {
     }
   }
 
-  // 步数用尽：不再提供任何工具，强制基于已有信息收尾
+  // 步数用尽：明确告知额度用尽并撤掉工具，避免模型把工具调用当文本输出
+  work.push({
+    role: 'system',
+    content: '工具调用额度已用完。不要再调用或输出任何工具调用格式，直接根据已经拿到的信息回答；信息不完整就说明哪部分没查到。'
+  })
   lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
   const final = await callDeepSeek(work, { tools: false })
   usage = mergeUsage(usage, final.usage)
