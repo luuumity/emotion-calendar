@@ -5,7 +5,6 @@ import { ScrollManager } from './components/ScrollManager'
 import { LoginPage } from './pages/LoginPage'
 import { MonthPage } from './pages/MonthPage'
 import { DayPage } from './pages/DayPage'
-import { AccessPage } from './pages/AccessPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
@@ -32,7 +31,7 @@ function Shell() {
       <Routes>
         <Route path="/" element={<MonthPage />} />
         <Route path="/day/:date" element={<DayPage />} />
-        <Route path="/access" element={<AccessPage />} />
+        <Route path="/access" element={<Navigate to="/settings?tab=access" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/insights" element={<InsightsPage />} />
         <Route path="/chat" element={<ChatPage />} />

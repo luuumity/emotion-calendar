@@ -11,7 +11,7 @@ function formatWhen(iso: string) {
   }
 }
 
-export function AccessPage() {
+export function AccessPanel() {
   const [info, setInfo] = useState<AccessInfo>({ mine: [], granted: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -103,15 +103,10 @@ export function AccessPage() {
   }
 
   return (
-    <div className="page access-page">
-      <section className="page-head">
-        <div>
-          <h1>授权管理</h1>
-          <p className="sub">
-            默认谁也不能看你的记录。生成一张凭证给对方，由你决定对方能看到颜色，还是连理由一起看到。只读，不能改。
-          </p>
-        </div>
-      </section>
+    <div className="access-panel">
+      <p className="panel-intro">
+        默认谁也不能看你的记录。生成一张凭证给对方，由你决定对方能看到颜色，还是连理由一起看到。只读，不能改。
+      </p>
 
       {error && <div className="banner error">{error}</div>}
       {notice && <div className="banner success">{notice}</div>}

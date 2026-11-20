@@ -40,16 +40,15 @@ export function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/chat" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             聊一聊
           </NavLink>
-          <NavLink to="/access" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
-            授权管理
-          </NavLink>
           <NavLink to="/settings" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
-            提醒设置
+            设置
           </NavLink>
         </nav>
 
         <div className="user-area">
-          <span className="avatar">{user?.displayName.slice(0, 1)}</span>
+          <Link to="/settings" className="avatar avatar-link" title="设置" aria-label="打开设置">
+            {user?.displayName.slice(0, 1)}
+          </Link>
           <span className="user-name">{user?.displayName}</span>
           <button type="button" className="ghost-btn small" onClick={logout}>
             退出
