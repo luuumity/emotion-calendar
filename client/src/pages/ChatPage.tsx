@@ -264,7 +264,7 @@ export function ChatPage() {
               <div className="chat-messages" ref={listRef}>
                 {messages.length === 0 && !sending && (
                   <div className="chat-empty-inline">
-                    它读过你的情绪日记、标签和过往分析，跟它聊聊吧。
+                    跟懂你的 Persona Agent 聊一聊，它读过你的情绪日记、标签和过往分析。
                   </div>
                 )}
 
