@@ -438,6 +438,118 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 
 参考产品：Wysa / Woebot（结构化 CBT）、Rosebud / Mindsera（日记反思）、Connected / Pragma / Harmony（Gottman / EFT / NVC）。风险参考：APA 2026 指南明确 AI 不能用于诊断；综述记录谄媚、自杀风险处理不一致、情感依赖等风险。
 
+#### 2.15 Persona Agent Harness 架构（2026-11-20 梳理）
+
+**现状：读什么、何时读**
+
+| 场景 | 注入内容 | 裁剪 | 时机 |
+|---|---|---|---|
+| 实时问答 | 全部 facts（无上限）、最近 15 条标签、最近 3 份单人报告（各截 200 字）、最近 8 轮对话（各截 300 字） | 无 | 每轮请求 |
+| 单人报告 | 周期内记录（分值/理由/修订）、全部 facts、20 条标签、最近 5 份报告、最近 20 条跨会话对话 | 无（本人全量） | 手动 / 定时 |
+| 双人报告 | 双方 pool（裁剪后）+ 增量记录 + `couple_memory.summary` | `cropForCouple()` | 手动 |
+
+已发现的问题：
+
+- 问答**不读原始日历记录**，但界面文案写"它读过你的情绪日记"，实际只能靠标签与报告推断
+- 历史对话被拼进 **system**（`lib/prompts/chat.js`），不是真实 message；每轮内容变化，导致缓存前缀永不命中
+- 全量注入，没有 token 预算、没有检索，数据增长后必然膨胀
+- facts 无数量上限
+- `couple_memory.summary` 是"报告前 200 字"，属于截断而非摘要
+
+**读写矩阵（目标态）**
+
+| 类别 | 内容 | 时机 |
+|---|---|---|
+| 被动注入 | system prompt、facts top-N、最近标签、最近报告摘要、会话摘要 | 每次请求 |
+| 主动取数 | 原始记录时间窗、某天详情、关键词检索、历史报告全文 | 模型判断需要时 |
+| 系统自动写 | 会话摘要、insights、memory 水位、usage | 生成后 |
+| 需确认写 | facts、record_tags | proposal → 用户确认 → API 落库 |
+
+Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，聊天只写消息。
+
+**压缩方案（轻量可靠）**
+
+- 按 **token** 而非轮数触发：会话历史超过预算（如 1500 tokens）时压缩
+- 保留最近 N 轮原文 + 更早轮次的滚动摘要；存 `summary` 与 `summary_until_message_id`
+- 摘要用低温度、小 `max_tokens` 单独调用；失败降级为截断并标记 `degraded`
+- `couple_memory.summary` 改为真正的摘要调用（输入：旧 summary + 本期新记录），不再截取前 200 字
+- facts 注入按 pinned + confidence + 最近使用排序，上限 30 条；全量只在报告中使用
+
+参考：LangChain ConversationSummaryBufferMemory、MemGPT/Letta 的分层记忆、Claude Code 的 compaction。
+
+**messages 结构（2026-11-20 定）**
+
+目标：稳定前缀命中缓存，动态内容只出现在尾部。
+
+| 顺序 | 角色 | 内容 | 变化频率 |
+|---|---|---|---|
+| 1 | system | 固定人格 + 回答规则 + 工具策略 + 隐私边界 + prompt 版本号 | 仅发版时变 |
+| 2 | system（同一块尾部） | facts（按 id 稳定排序，最多 30 条、每条 ≤120 字） | 用户确认新事实时变 |
+| 3 | system（同一块尾部） | 会话滚动摘要（若有） | 每约 10 轮变一次 |
+| 4 | user / assistant | 最近的真实对话轮次（最多 12 条），**不再塞进 system** | 每轮变 |
+| 5 | user | 本轮消息（可含今天日期、引用块） | 每轮变 |
+
+- 禁止把"今天是 X 月 X 日"、条数统计等动态内容写进 system 顶部，否则前缀永不命中
+- 工具调用以 `assistant.tool_calls` + `tool` 消息出现，**只在当轮使用，不回放进后续历史**
+
+**主动读（2026-11-20 定）**
+
+被动注入的固定策略容易过时，改为「少量稳定上下文 + 按需取数」：
+
+- 常驻只保留：system、facts、最近一份报告摘要、会话摘要
+- 只读工具：`get_days(start,end)`、`get_day(date)`、`search_records(query,start,end)`、`list_reports(scope,limit)`、`get_report(id)`
+- 限制：单轮最多 3 次工具调用；单次结果 ≤2k tokens；超出由工具侧截断
+- 冷启动（无 facts、无报告）：允许模型先 `get_days` 读全量，或提出"生成一份从开始到现在的报告"
+- 报告生成不走工具：周期固定、需要确定性，直接注入记录
+
+**写 = proposal，不直接落库（2026-11-20 定）**
+
+模型在回复末尾输出结构化提议，后端剥离后随响应返回，前端确认再落库：
+
+```
+<proposal>{"type":"fact","content":"..."}</proposal>
+<proposal>{"type":"tag","recordId":123,"tagType":"insight","content":"..."}</proposal>
+<proposal>{"type":"report","start":"2026-01-01","end":"2026-11-20"}</proposal>
+```
+
+- 三类写入：fact、tag、report（report 确认后调生成接口，`period_type='custom'`）
+- 幂等键：`source_message_id + content hash`
+- 溯源：沿用 `source_ref_message_id` / `source_ref_id`
+- 记录本身永不由 agent 写，只允许附着标签
+
+**压缩（2026-11-20 定）**
+
+只压对话，不压数据——数据在库里，按需再取，不驻留上下文。
+
+- 触发：真实历史 > 12 条 **或** 估算 tokens > 1500（中文按 字符数/1.5 估）
+- 方式：保留最近 6 轮原文，更早的做增量摘要：`旧摘要 + 被挤出轮次 → 新摘要`
+- 落库：`chat_sessions.summary` + `summary_until_message_id` + `summary_prompt_version`
+- 失败降级：摘要调用失败则退回纯截断，标记 `degraded`，不影响本轮回复
+- 执行时机：回复返回后异步执行；若上次未完成，下次请求前同步补做
+
+**预算（2026-11-20 定）**
+
+不做"百分比分区"，只做「每段上限 + 截断顺序」：
+
+| 段 | 上限 |
+|---|---|
+| system（含人格与规则） | 1.5k tokens |
+| facts | 30 条 × 120 字 |
+| 最近一份报告摘要 | 400 tokens |
+| 会话摘要 | 400 tokens |
+| 真实历史 | 1500 tokens / 12 条 |
+| 单次工具结果 | 2k tokens |
+
+超出总预算时按此顺序砍：旧历史 → 工具结果 → facts → 报告摘要。system 永不截断。
+
+**分期**
+
+- [ ] P0：改 messages 结构（历史出 system、真实 role、稳定前缀）
+- [ ] P1：主动读工具 + 工具循环 + 上限
+- [ ] P2：会话滚动摘要 + `couple_memory` 真摘要
+- [ ] P3：写协议（proposal 解析 + 前端确认 + 三类落库）
+- [ ] 前置实测：服务端工具 `deepseek_read_url` 与客户端 function calling 能否同时声明；若冲突，聊天优先保留 read_url
+
 ### 3. 私密记录标签（配合双人分析）
 
 - [ ] `records` 增加 `is_private` 字段，默认 0；创建时可设置，之后也允许修改
