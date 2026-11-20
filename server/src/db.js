@@ -217,6 +217,21 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
       `)
     }
+  },
+  {
+    version: 5,
+    // 幂等保护：给 insights 加数据库层部分唯一索引
+    // SQLite 部分唯一索引支持 WHERE 子句限定 scope，单人/双人各一条
+    // 同时给 facts 加普通索引加速"用户已有相似内容"查询
+    up() {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_single_unique
+          ON insights(user_id, period_type, period_start) WHERE scope = 'single';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_couple_unique
+          ON insights(couple_key, period_type, period_start) WHERE scope = 'couple';
+        CREATE INDEX IF NOT EXISTS idx_facts_user_content ON facts(user_id, content, couple_visible);
+      `)
+    }
   }
 ]
 
