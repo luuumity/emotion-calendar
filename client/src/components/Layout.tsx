@@ -34,6 +34,12 @@ export function Layout({ children }: { children: ReactNode }) {
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             月视图
           </NavLink>
+          <NavLink to="/insights" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+            AI 分析
+          </NavLink>
+          <NavLink to="/chat" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
+            聊一聊
+          </NavLink>
           <NavLink to="/access" className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}>
             授权管理
           </NavLink>

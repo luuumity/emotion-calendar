@@ -1,0 +1,309 @@
+import { useEffect, useMemo, useState } from 'react'
+import { api, type Insight, type AccessInfo, type Granted } from '../lib/api'
+
+type Tab = 'single' | 'couple'
+
+function formatPeriod(insight: Insight) {
+  return `${insight.periodStart} ~ ${insight.periodEnd}`
+}
+
+function formatTime(iso: string) {
+  const d = new Date(iso)
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function summarize(text: string, n = 200) {
+  if (!text) return ''
+  const t = text.replace(/\s+/g, ' ').trim()
+  return t.length > n ? t.slice(0, n) + '…' : t
+}
+
+/**
+ * 从 access 信息里找出和我有"互惠 full 档"授权的对象
+ * 返回 [{ partnerId, partnerName }]
+ */
+function findReciprocalFull(access: AccessInfo): { partnerId: number; partnerName: string }[] {
+  // granted: 对方给我的授权（owner_id = 对方）
+  const grantedFull = new Map<number, Granted>()
+  for (const g of access.granted) {
+    if (g.scope === 'full') grantedFull.set(g.id, g)
+  }
+
+  // mine: 我创建的 share → viewers 里我给了谁
+  const result: { partnerId: number; partnerName: string }[] = []
+  const seen = new Set<number>()
+  for (const share of access.mine) {
+    for (const v of share.viewers) {
+      if (v.scope === 'full' && grantedFull.has(v.id) && !seen.has(v.id)) {
+        seen.add(v.id)
+        result.push({ partnerId: v.id, partnerName: v.displayName })
+      }
+    }
+  }
+  return result
+}
+
+/** 所有我给过 full 授权的人（不管对方有没有回给我） */
+function findMyFullViewers(access: AccessInfo) {
+  const map = new Map<number, string>()
+  for (const share of access.mine) {
+    for (const v of share.viewers) {
+      if (v.scope === 'full') map.set(v.id, v.displayName)
+    }
+  }
+  return map
+}
+
+/** 所有给过我 full 授权的人（不管我有没有回给对方） */
+function findGrantedFullOwners(access: AccessInfo) {
+  const map = new Map<number, string>()
+  for (const g of access.granted) {
+    if (g.scope === 'full') map.set(g.id, g.displayName)
+  }
+  return map
+}
+
+export function InsightsPage() {
+  const [tab, setTab] = useState<Tab>('single')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [insights, setInsights] = useState<Insight[]>([])
+  const [access, setAccess] = useState<AccessInfo | null>(null)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+
+  const [generating, setGenerating] = useState(false)
+  const [generateErr, setGenerateErr] = useState<string | null>(null)
+  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true)
+    setError(null)
+    try {
+      const [ins, acc] = await Promise.all([api.insights(), api.access()])
+      setInsights(ins.insights)
+      setAccess(acc)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [])
+
+  const singleList = useMemo(() => insights.filter((i) => i.scope === 'single'), [insights])
+  const coupleList = useMemo(() => insights.filter((i) => i.scope === 'couple'), [insights])
+
+  const reciprocal = useMemo(() => (access ? findReciprocalFull(access) : []), [access])
+  const myFull = useMemo(() => (access ? findMyFullViewers(access) : new Map()), [access])
+  const grantedFull = useMemo(() => (access ? findGrantedFullOwners(access) : new Map()), [access])
+
+  async function handleGenerateSingle() {
+    setGenerating(true)
+    setGenerateErr(null)
+    setGenerateSuccess(null)
+    try {
+      const res = await api.generateSingleInsight({ periodType: 'week' })
+      setGenerateSuccess(res.hasKey ? '报告已生成' : 'AI 服务未配置，返回了占位内容')
+      await load()
+      // 自动展开新生成的
+      setExpandedId(res.insight.id)
+    } catch (e) {
+      setGenerateErr(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleGenerateCouple(partnerId: number) {
+    setGenerating(true)
+    setGenerateErr(null)
+    setGenerateSuccess(null)
+    try {
+      const res = await api.generateCoupleInsight(partnerId)
+      setGenerateSuccess(res.hasKey ? '双人报告已生成' : 'AI 服务未配置，返回了占位内容')
+      await load()
+      setExpandedId(res.insight.id)
+    } catch (e) {
+      setGenerateErr(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <div className="page insights-page">
+      <div className="page-head">
+        <div>
+          <h1>AI 分析</h1>
+          <p className="sub">把你的情绪日记交给 Persona Agent，让它用你的 fact、标签和过往记录，写出一份有温度的报告。</p>
+        </div>
+      </div>
+
+      <div className="insights-tabs">
+        <button
+          type="button"
+          className={'insights-tab ' + (tab === 'single' ? 'active' : '')}
+          onClick={() => setTab('single')}
+        >
+          单人分析
+          <span className="insights-tab-count">{singleList.length}</span>
+        </button>
+        <button
+          type="button"
+          className={'insights-tab ' + (tab === 'couple' ? 'active' : '')}
+          onClick={() => setTab('couple')}
+        >
+          双人分析
+          <span className="insights-tab-count">{coupleList.length}</span>
+        </button>
+      </div>
+
+      {error && <div className="banner error">{error}</div>}
+
+      {tab === 'single' && (
+        <section className="insights-section">
+          <div className="insights-actions">
+            <p className="insights-actions-hint">基于本周（周一～周日）的情绪记录生成一份分析。</p>
+            <button
+              type="button"
+              className="primary-btn"
+              onClick={handleGenerateSingle}
+              disabled={generating}
+            >
+              {generating ? '生成中…' : '生成本周报告'}
+            </button>
+          </div>
+
+          {generateErr && <div className="banner error">{generateErr}</div>}
+          {generateSuccess && <div className="banner success">{generateSuccess}</div>}
+
+          {loading ? (
+            <p className="loading-hint">正在加载…</p>
+          ) : singleList.length === 0 ? (
+            <div className="insights-empty card">
+              <h3>还没有单人报告</h3>
+              <p>记录了几天情绪之后，就可以点上面的按钮生成第一份分析啦。</p>
+            </div>
+          ) : (
+            <div className="insight-list">
+              {singleList.map((ins) => (
+                <InsightCard
+                  key={ins.id}
+                  insight={ins}
+                  expanded={expandedId === ins.id}
+                  onToggle={() => setExpandedId((prev) => (prev === ins.id ? null : ins.id))}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === 'couple' && (
+        <section className="insights-section">
+          {/* 互惠 full 的对象 */}
+          {reciprocal.length === 0 ? (
+            <div className="banner info">
+              需要双方都给对方 <strong>full 档</strong> 授权才能生成双人报告。
+              <br />
+              （目前你给过 full 的：{myFull.size || 0} 人；给过你 full 的：{grantedFull.size || 0} 人）
+            </div>
+          ) : (
+            <div className="couple-generate-row">
+              {reciprocal.map(({ partnerId, partnerName }) => (
+                <div key={partnerId} className="couple-generate-card card">
+                  <div className="couple-generate-head">
+                    <div>
+                      <span className="tag full">已互惠 full 档</span>
+                      <h3>与 {partnerName}</h3>
+                      <p className="couple-generate-hint">报告基于双方的增量记录，下次生成自动跳过已覆盖的周期。</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={() => handleGenerateCouple(partnerId)}
+                      disabled={generating}
+                    >
+                      {generating ? '生成中…' : '生成双人报告'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {generateErr && <div className="banner error">{generateErr}</div>}
+          {generateSuccess && <div className="banner success">{generateSuccess}</div>}
+
+          {loading ? (
+            <p className="loading-hint">正在加载…</p>
+          ) : coupleList.length === 0 ? (
+            <div className="insights-empty card">
+              <h3>还没有双人报告</h3>
+              <p>互相 full 授权之后，就可以一起看看 AI 怎么说你们的情绪节奏啦。</p>
+            </div>
+          ) : (
+            <div className="insight-list">
+              {coupleList.map((ins) => (
+                <InsightCard
+                  key={ins.id}
+                  insight={ins}
+                  expanded={expandedId === ins.id}
+                  onToggle={() => setExpandedId((prev) => (prev === ins.id ? null : ins.id))}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}
+
+function InsightCard({
+  insight,
+  expanded,
+  onToggle
+}: {
+  insight: Insight
+  expanded: boolean
+  onToggle: () => void
+}) {
+  return (
+    <article className={'insight-card card ' + (expanded ? 'expanded' : '')}>
+      <header className="insight-card-head" onClick={onToggle} role="button" tabIndex={0}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onToggle()}
+      >
+        <div className="insight-card-head-main">
+          <span className={'tag ' + (insight.scope === 'couple' ? 'full' : '')}>
+            {insight.scope === 'couple' ? '双人' : '单人'}
+          </span>
+          <h3>{formatPeriod(insight)}</h3>
+          <p className="insight-card-meta">
+            {formatTime(insight.generatedAt)}
+            {insight.tokens ? ` · ${insight.tokens} tokens` : ''}
+          </p>
+        </div>
+        <span className="insight-chevron">{expanded ? '▲' : '▼'}</span>
+      </header>
+
+      {expanded ? (
+        <div className="insight-content">
+          {insight.content.split('\n').map((line, i) => (
+            <p key={i}>{line || '\u00A0'}</p>
+          ))}
+        </div>
+      ) : (
+        <p className="insight-summary">{summarize(insight.content, 220)}</p>
+      )}
+    </article>
+  )
+}

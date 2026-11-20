@@ -6,8 +6,22 @@ export type RecordItem = {
   score: number
   note?: string
   hasNote?: boolean
+  originalScore?: number | null
+  adjustedAt?: string | null
   createdAt?: string
   updatedAt?: string
+}
+
+export type RecordTag = {
+  id: number
+  recordId: number
+  recordDay: string
+  tagType: 'insight' | 'suggestion' | 'pattern' | 'correction'
+  content: string
+  source: 'user' | 'agent'
+  sourceRefMessageId?: number | null
+  coupleVisible: boolean
+  createdAt: string
 }
 
 export type ShareViewer = {
@@ -67,6 +81,43 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T
 }
 
+// ---------- AI 报告（insights） ----------
+
+export type Insight = {
+  id: number
+  scope: 'single' | 'couple'
+  userId?: number | null
+  coupleKey?: string | null
+  periodType: string
+  periodStart: string
+  periodEnd: string
+  content: string
+  model?: string | null
+  promptVersion?: string | null
+  tokens?: number | null
+  sources?: { id: number; type: string; content?: string }[] | null
+  coveredUntil?: string | null
+  generatedAt: string
+}
+
+// ---------- 聊天 ----------
+
+export type ChatSession = {
+  id: number
+  title: string
+  messageCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type ChatMessage = {
+  id: number
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  refs?: { id: number; type: string; content?: string }[] | null
+  createdAt: string
+}
+
 export const api = {
   me: () => request<{ user: User }>('/auth/me'),
   login: (username: string, password: string) =>
@@ -84,7 +135,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(note === undefined ? { day, score } : { day, score, note })
     }),
-  updateRecord: (id: number, patch: { note: string }, opts?: { keepalive?: boolean }) =>
+  updateRecord: (id: number, patch: { note?: string; score?: number }, opts?: { keepalive?: boolean }) =>
     request<{ record: RecordItem }>(`/records/${id}`, {
       method: 'PUT',
       body: JSON.stringify(patch),
@@ -125,5 +176,46 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ enabled, time, timezone })
     }),
-  pushTest: () => request<{ ok: true; sent: number }>('/push/test', { method: 'POST' })
+  pushTest: () => request<{ ok: true; sent: number }>('/push/test', { method: 'POST' }),
+
+  // ---- record tags ----
+  tagsOfRecord: (recordId: number) => request<{ tags: RecordTag[] }>(`/tags/of-record/${recordId}`),
+  createTag: (recordId: number, tagType: RecordTag['tagType'], content: string) =>
+    request<{ tag: RecordTag }>('/tags', {
+      method: 'POST',
+      body: JSON.stringify({ recordId, tagType, content })
+    }),
+  deleteTag: (id: number) => request<{ ok: true }>(`/tags/${id}`, { method: 'DELETE' }),
+
+  // ---- insights ----
+  insights: () => request<{ insights: Insight[] }>('/insights'),
+  insight: (id: number) => request<{ insight: Insight }>(`/insights/${id}`),
+  generateSingleInsight: (body: { periodType?: 'week' | 'month' | 'manual'; start?: string; end?: string }) =>
+    request<{ insight: Insight; usage?: { total_tokens: number }; hasKey?: boolean }>('/insights/single/generate', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  generateCoupleInsight: (partnerId: number) =>
+    request<{ insight: Insight; usage?: { total_tokens: number }; hasKey?: boolean }>('/insights/couple/generate', {
+      method: 'POST',
+      body: JSON.stringify({ partnerId })
+    }),
+
+  // ---- chat ----
+  chatSessions: () => request<{ sessions: ChatSession[] }>('/chat/sessions'),
+  createChatSession: (title = '新对话') =>
+    request<{ session: ChatSession }>('/chat/sessions', { method: 'POST', body: JSON.stringify({ title }) }),
+  patchChatSession: (id: number, title: string) =>
+    request<{ session: ChatSession }>(`/chat/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  deleteChatSession: (id: number) => request<{ ok: true }>(`/chat/sessions/${id}`, { method: 'DELETE' }),
+  chatMessages: (sessionId: number) =>
+    request<{ messages: ChatMessage[] }>(`/chat/sessions/${sessionId}/messages`),
+  sendChatMessage: (
+    sessionId: number,
+    body: { content: string; refs?: { id: number; type: string; content?: string }[] }
+  ) =>
+    request<{ userMessage: ChatMessage; assistantMessage: ChatMessage; usage?: { total_tokens: number } }>(
+      `/chat/sessions/${sessionId}/messages`,
+      { method: 'POST', body: JSON.stringify(body) }
+    )
 }

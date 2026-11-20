@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api, ApiError, type Granted, type RecordItem } from '../lib/api'
+import { api, ApiError, type Granted, type RecordItem, type RecordTag } from '../lib/api'
 import { GachaMachine, type GachaBall } from '../components/GachaMachine'
 import { SwatchRail } from '../components/ScoreBits'
 import { isDark, scoreColor, scoreLabel, scoreSoftColor } from '../lib/colors'
@@ -18,6 +18,16 @@ type DragSession = { kind: 'create'; score: number; startX: number; startY: numb
 
 function sortById(records: RecordItem[]) {
   return records.slice().sort((a, b) => a.id - b.id)
+}
+
+function labelForTag(type: RecordTag['tagType']) {
+  switch (type) {
+    case 'insight': return '洞察'
+    case 'suggestion': return '建议'
+    case 'pattern': return '模式'
+    case 'correction': return '修正'
+    default: return type
+  }
 }
 
 export function DayPage() {
@@ -40,6 +50,11 @@ export function DayPage() {
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [toast, setToast] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [scoreEditing, setScoreEditing] = useState(false)
+  const [scoreDraft, setScoreDraft] = useState(0)
+  const [scoreSaving, setScoreSaving] = useState(false)
+  const [tags, setTags] = useState<RecordTag[]>([])
+  const [tagsLoading, setTagsLoading] = useState(false)
   const machineRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragSession | null>(null)
   const ballDragRef = useRef<GachaBall | null>(null)
@@ -124,8 +139,35 @@ export function DayPage() {
     setNoteDraft(selectedNoteRef.current ?? '')
     setDirty(false)
     setSaveState('idle')
+    setScoreEditing(false)
+    if (selected) setScoreDraft(selected.score)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, asId])
+
+  // 选中扭蛋后拉 AI 标签
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      if (!selected) {
+        setTags([])
+        setTagsLoading(false)
+        return
+      }
+      setTagsLoading(true)
+      try {
+        const res = await api.tagsOfRecord(selected.id)
+        if (alive) setTags(res.tags)
+      } catch {
+        if (alive) setTags([])
+      } finally {
+        if (alive) setTagsLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      alive = false
+    }
+  }, [selected?.id])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -248,6 +290,35 @@ export function DayPage() {
     const index = balls.find((b) => b.id === selected.id)?.index ?? ''
     if (!window.confirm(`确定要删掉第 ${index} 颗扭蛋吗？`)) return
     await deleteBall(selected.id)
+  }
+
+  async function saveScore() {
+    if (!canEdit || !selected || !scoreEditing) return
+    const nextScore = Math.max(0, Math.min(100, Math.round(scoreDraft)))
+    if (nextScore === selected.score) {
+      setScoreEditing(false)
+      return
+    }
+    setScoreSaving(true)
+    try {
+      const res = await api.updateRecord(selected.id, { score: nextScore })
+      replaceRecord(res.record)
+      setScoreEditing(false)
+      setToast(`分值已调整为 ${nextScore}`)
+    } catch (err) {
+      setToast(errorMessage(err))
+    } finally {
+      setScoreSaving(false)
+    }
+  }
+
+  async function removeTag(tagId: number) {
+    try {
+      await api.deleteTag(tagId)
+      setTags((prev) => prev.filter((t) => t.id !== tagId))
+    } catch {
+      setToast('删除标签失败')
+    }
   }
 
   function isOverMachine(x: number, y: number) {
@@ -428,7 +499,7 @@ export function DayPage() {
             <SwatchRail
               onDragStart={startDrag}
               title="点一下，或拖进扭蛋机"
-              hint="颜色和分值创建后不可修改"
+              hint="分值可以随时调整"
             />
           ) : (
             <div className="readonly-strip">
@@ -447,16 +518,33 @@ export function DayPage() {
                 <h2>{Number(date.slice(8, 10))} 日</h2>
               </div>
               {selected ? (
-                <span
-                  className="score-chip"
-                  style={{
-                    background: scoreSoftColor(selected.score, 0.16),
-                    color: scoreColor(selected.score)
-                  }}
-                >
-                  {selected.score}
-                  <small>分</small>
-                </span>
+                <div className="record-head-right">
+                  <span
+                    className="score-chip"
+                    style={{
+                      background: scoreSoftColor(selected.score, 0.16),
+                      color: scoreColor(selected.score)
+                    }}
+                  >
+                    {selected.score}
+                    <small>分</small>
+                  </span>
+                  {canEdit && !scoreEditing && (
+                    <button
+                      type="button"
+                      className="ghost-btn small record-edit-score"
+                      onClick={() => {
+                        setScoreDraft(selected.score)
+                        setScoreEditing(true)
+                      }}
+                    >
+                      改
+                    </button>
+                  )}
+                  {selected.adjustedAt && (
+                    <span className="record-adjusted-tag">已调过</span>
+                  )}
+                </div>
               ) : average != null ? (
                 <span className="score-chip muted">均值 {average}</span>
               ) : (
@@ -477,6 +565,101 @@ export function DayPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* 分值编辑器 */}
+                {scoreEditing && canEdit && (
+                  <div className="score-editor">
+                    <div className="score-editor-row">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={scoreDraft}
+                        onChange={(e) => setScoreDraft(Number(e.target.value))}
+                        className="score-slider"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={scoreDraft}
+                        onChange={(e) => setScoreDraft(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                        className="score-number"
+                      />
+                    </div>
+                    <div className="score-editor-row">
+                      <button type="button" className="ghost-btn small" onClick={() => setScoreDraft((v) => Math.max(0, v - 10))}>
+                        -10
+                      </button>
+                      <button type="button" className="ghost-btn small" onClick={() => setScoreDraft((v) => Math.max(0, v - 1))}>
+                        -1
+                      </button>
+                      <button type="button" className="ghost-btn small" onClick={() => setScoreDraft((v) => Math.min(100, v + 1))}>
+                        +1
+                      </button>
+                      <button type="button" className="ghost-btn small" onClick={() => setScoreDraft((v) => Math.min(100, v + 10))}>
+                        +10
+                      </button>
+                      <span className="score-editor-hint">
+                        原分值 {selected.originalScore ?? selected.score} → {scoreDraft}
+                      </span>
+                    </div>
+                    <div className="score-editor-row">
+                      <button
+                        type="button"
+                        className="ghost-btn small"
+                        onClick={() => {
+                          setScoreEditing(false)
+                          setScoreDraft(selected.score)
+                        }}
+                        disabled={scoreSaving}
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        onClick={saveScore}
+                        disabled={scoreSaving || scoreDraft === selected.score}
+                      >
+                        {scoreSaving ? '保存中…' : '保存分值'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* AI 标签（只在看自己的记录时展示，标签是私有的） */}
+                {asId == null && (
+                <div className="tags-block">
+                  <div className="tags-head">
+                    <span>AI 洞察</span>
+                    {tagsLoading && <span className="tags-loading">加载中…</span>}
+                  </div>
+                  {!tagsLoading && tags.length === 0 && (
+                    <p className="tags-empty">还没有标签。生成单人报告或让 Agent 分析后，这里会出现相关的洞察、建议和模式。</p>
+                  )}
+                  {!tagsLoading && tags.length > 0 && (
+                    <div className="tags-list">
+                      {tags.map((t) => (
+                        <div key={t.id} className={'tag-pill tag-' + t.tagType}>
+                          <span className="tag-pill-label">{labelForTag(t.tagType)}</span>
+                          <span className="tag-pill-content">{t.content}</span>
+                          {canEdit && t.source === 'agent' && (
+                            <button
+                              type="button"
+                              className="tag-pill-remove"
+                              onClick={() => removeTag(t.id)}
+                              title="删除这条标签"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                )}
 
                 <div className="note-block">
                   <div className="note-head">
@@ -563,7 +746,7 @@ export function DayPage() {
               <li>从红色到绿色，挑一个最接近此刻感受的颜色。</li>
               <li>点一下或拖进扭蛋机，同一天可以投很多颗，月视图取平均。</li>
               <li>新建后会自动打开理由框，补上当时的理由；点开任意一颗也能改理由。</li>
-              <li>颜色和分值创建后不能改，想换就删掉重投；选中只用于写理由或删除。</li>
+              <li>分值可以随时调整：点击分值旁的「改」即可改；理由随时可写。</li>
               <li>手机长按、电脑按住画布里的扭蛋，拖到下方红区松手即可快速删除。</li>
             </ol>
           </section>
