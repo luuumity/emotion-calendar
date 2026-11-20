@@ -193,49 +193,108 @@ record_tags(id, record_id, tag_type('insight'|'suggestion'|'pattern'|'correction
 - 只读取双方 `couple_visible=1` 的 AI 标签
 - 标签以"聚合后"的形式进入双人报告（如"双方均多次提到沟通回避"），不逐条罗列
 
-#### 2.12 双人报告增强路线（2026-11-20 定，分阶段）
+#### 2.12 Persona Agent 统一模型（2026-11-20 定）
 
-**短期（本项目先做阶段一）：增强上下文的单 agent**
+**核心洞察**：每个用户只有**一个** persona agent。它既是用户日常对话的问答 agent，也是单人报告的执行者，也是双人分析中"代表自己说话"的那个身份。三个场景只是同一个 agent 在不同上下文中的复用。
 
-双人报告仍然是**单个模型调用**，但输入除了原始记录，还叠加：
-
-- 双方 `couple_visible=1` 的 facts
-- 双方 `couple_visible=1` 的 AI 标签（聚合后）
-- 双方最近的单人报告摘要
-- 上次双人报告的记忆（现有 `couple_memory`）
-- 模糊化元信息（私密理由数量/比例，仅用于不确定性校准）
-
-这一阶段不做多 agent 对谈，成本可控，收益直接——facts 和 AI 标签先落地，本身就能显著提升报告质量。
-
-**长期（facts + 标签跑通后再评估）：多 agent 对谈**
-
-参考 RELATE-Sim 和 LoveSims 两篇学术框架的思路，但做工程化裁剪：
+##### Persona Agent 的构成
 
 ```
-[用户 A 的 persona] ←→ [用户 B 的 persona]
-         ↓                        ↓
-  A 的 facts + AI标签          B 的 facts + AI标签
-         ↓                        ↓
-     对谈 moderator（引导 agent）
+Persona Agent 状态 = 三部分
+├── System Prompt（固定）
+│   定义人格、语气、分析框架、隐私边界
+│
+├── 持久记忆（随对话自然积累）
+│   ├── facts 全量（全部置信度、全部 couple_visible 状态）
+│   └── chat_sessions + chat_messages 全量
+│
+└── 运行时按需取数
+    ├── 原始记录全量（含私密，不管场景）
+    ├── record_tags 全量（不管场景）
+    └── insights scope=single 全量（自己的历史单人报告）
+```
+
+**关键**：Persona agent 在**输入侧永远读自己的全部数据**，包括私密理由、`couple_visible=0` 的 facts 和标签。裁剪只发生在**输出侧**（双人场景下 prompt 明确要求"不要提及对方看不到的内容"），而不是在取数据时做。
+
+##### 三个使用场景
+
+| 场景 | 触发 | 谁读什么 | 产出 |
+|---|---|---|---|
+| **A. 日常问答** | 用户主动打开问答页面 | persona agent 读自己的全部数据池 | 对话回复；对话中可能产生新的 facts/AI 标签 |
+| **B. 单人报告** | 每周/每月定时自动跑 | persona agent 读自己的全部数据池 | `insights scope=single` 新一行 |
+| **C. 双人分析** | 手动触发（阶段一）或多 agent 对谈（阶段二） | 见下 | `insights scope=couple` 新一行 |
+
+双人分析是唯一需要"同时读对方数据"的场景，分两个阶段实现：
+
+##### 阶段一：双 Persona 单调用（先做）
+
+**不是引入一个"双人报告 agent"，而是让 A 和 B 的 persona agent 在同一次模型调用中各自发言**。
+
+Prompt 模板内联两个 persona 的完整状态快照（各自的 system prompt + facts 摘要 + 最近单人报告摘要），让模型一次生成包含双方视角的双人报告。双方的原始记录、AI 标签、facts 都在输入里，但：
+
+- A 的 persona 快照只给 A 的数据 + B 当前授权可见的数据（`couple_visible=1` + 非私密理由）
+- B 的 persona 快照对称
+- Prompt 要求："以 A 的视角分析 A 的行为，以 B 的视角分析 B 的行为，综合后给出双人报告"
+
+**成本**：1 次模型调用。A 和 B 的 persona 各写一个摘要注入 prompt，不额外调模型。
+
+##### 阶段二：Fork 快照多对谈（facts 跑通后再评估）
+
+把两个 persona agent 的完整状态**序列化**（不是复制进程，是生成 prompt 模板），然后开两个独立上下文让它们互相说：
+
+```
+A 的 persona fork ←──互相说──→ B 的 persona fork
+         ↑                              ↑
+   A 全部数据池                  B 全部数据池
+（输入侧全量，                   （输入侧全量，
+ 含私密，但                       含私密，但
+ 不读 B 的原始数据）               不读 A 的原始数据）
+         ↓                              ↓
+    moderator 引导 agent（独立一次调用）
          ↓
-  总结 agent → 产出双人报告（含对谈过程摘要）
+    总结 agent → 产出双人报告 + 对谈过程摘要
 ```
 
-**关键约束（必须满足才考虑实现）**：
+**同一性保证**：对谈里的 persona 就是平时跟用户聊天的那个，风格、认知、判断基准完全一致。Fork 快照 = 把 persona 当前的 system prompt + facts + 对话历史摘要**序列化**成一份 prompt 模板。
 
-1. **隐私隔离**：A 的 persona agent 只能读 A 的 facts + A 的 AI 标签 + 双方原始记录（full 档），**绝对不能读 B 的 facts**。B 的 agent 对称。这是 RELATE-Sim 的 "No Mind Reading" 原则
-2. **对谈可见性**：两个 agent 的"内心想法"不进入报告，只有它们**互相说出来的话**（对谈 transcript 中标记为 `public` 的部分）才被总结 agent 消费
-3. **成本评估**：至少 3 次 LLM 调用（两个 persona 各一次准备 + moderator 引导 + 总结），约 3-5 倍于单 agent。先看阶段一的实际成本和质量，再决定值不值
-4. **首次触发门槛**：双方如果都没有个人报告/AI 标签，先**自动各跑一次单人分析**，拿到 persona 素材后再开始对谈——对谈至少建立在"双方 agent 各自理解自己"的基础上，否则是无的放矢
+**关键约束**：
 
-**为什么短期不做多 agent 对谈**：
+1. **隐私隔离（No Mind Reading）**：A 的 persona fork **绝不直接读** B 的原始记录、B 的 facts、B 的 AI 标签。对 B 的全部了解都来自：(a) B 的 persona 在对谈中说出来的话；(b) 已有的历史双人报告（`insights scope=couple`）
+2. **对话可见性**：persona 的内心想法不进入报告，只有互相说出来的话（`public speech` 部分）被总结
+3. **首次触发兜底**：如果一方从来没跟自己的 persona 聊过（没有 facts、没有单人报告），fork 启动时**自动让该 persona 先跑一次单人自我分析**作为素材——但这是兜底而非常态
+4. **成本**：至少 3 次调用（两个 persona 各一轮 + moderator 引导 + 总结），约 3-5 倍于单调用。先看阶段一的实际质量再决定
 
-- 事实层面：现在还没有 facts 和 AI 标签，agent 对谈缺素材
-- 成本层面：在还不知道单 agent + 增强上下文能做到什么程度之前，多 agent 是 premature optimization
-- 可调试性：链路越长越难定位问题（两个 agent 矛盾、moderator 引导失败、总结 agent 漏点）
-- 工程复杂度：需要引入 persona 生成、对谈轮次控制、超时/中断恢复、结果仲裁等一整套机制
+##### couple_memory 在新模型里的位置
 
-**阶段一先跑，跑出实际数据再决定阶段二要不要做。**
+couple_memory 存的是**阶段一双人报告的增量水位 + 压缩记忆**。阶段一每次手动触发时：
+
+```
+阶段一双人报告生成流程：
+1. couple_key = sort(A_id, B_id).join('|')
+2. 查 couple_memory：
+   - covered_until = 上次覆盖到哪天（没有则为空，取全部新记录）
+   - summary = 上次压缩记忆
+3. 取 covered_until+1 之后双方的新记录
+4. 序列化 A 的 persona 快照（A 全部数据 + B 授权可见的）
+5. 序列化 B 的 persona 快照（B 全部数据 + A 授权可见的）
+6. Prompt = 两个快照 + 新记录 + 上次 summary
+7. 模型一次调用 → 产出双人报告
+8. 写 insights(scope='couple')
+9. 更新 couple_memory(covered_until=今天, summary=本次压缩)
+```
+
+阶段二多 agent 对谈也复用 couple_memory 作为增量水位，但 summary 变成"上次对谈的压缩记忆"。
+
+##### 阶段一 vs 阶段二 对比
+
+| | 阶段一（先做） | 阶段二（后做） |
+|---|---|---|
+| 模型调用次数 | 1 次 | 3-5 次 |
+| Persona 同一性 | 内嵌 prompt 快照，一致性靠模板保证 | 独立上下文运行，真正的对话 |
+| 隐私隔离 | 天然：A 的数据和 B 的数据在 prompt 里分块 | 硬保证：A 的 fork 进程绝不读 B 的原始数据 |
+| 对谈过程 | 无，一次产出 | 有，报告包含对谈摘要 |
+| 成本 | 低 | 高 |
+| 实施顺序 | 先写，和 facts 同阶段 | 有了实际数据再评估 |
 
 #### 2.9 联网检索与模型选型（2026-11-19 调研）
 
