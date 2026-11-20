@@ -504,18 +504,20 @@ Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，
 
 **写 = proposal，不直接落库（2026-11-20 定）**
 
-模型在回复末尾输出结构化提议，后端剥离后随响应返回，前端确认再落库：
+模型不直接写库。推荐用**工具**实现提议（schema 可校验），工具只创建 `pending` 记录，不落正式数据：
 
 ```
-<proposal>{"type":"fact","content":"..."}</proposal>
-<proposal>{"type":"tag","recordId":123,"tagType":"insight","content":"..."}</proposal>
-<proposal>{"type":"report","start":"2026-01-01","end":"2026-11-20"}</proposal>
+propose_fact({ content, confidence? })
+propose_tag({ recordId, tagType, content })
+propose_report({ start, end })
 ```
 
 - 三类写入：fact、tag、report（report 确认后调生成接口，`period_type='custom'`）
+- 工具返回 `{proposalId}`，最终回复里只自然语言说明"我整理了几条建议，你看看要不要保存"
 - 幂等键：`source_message_id + content hash`
 - 溯源：沿用 `source_ref_message_id` / `source_ref_id`
 - 记录本身永不由 agent 写，只允许附着标签
+- 备选方案：回复末尾输出 `<proposal>` 标签再解析。少一次工具往返，但格式不稳定，暂不采用
 
 **压缩（2026-11-20 定）**
 
@@ -542,13 +544,45 @@ Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，
 
 超出总预算时按此顺序砍：旧历史 → 工具结果 → facts → 报告摘要。system 永不截断。
 
+**接口与运行时（2026-11-20 定）**
+
+工具定义：
+
+- 工具写在请求的 `tools` 参数里，**不进 messages**；格式为 `{type:'function', function:{name, description, parameters(JSON Schema)}}`
+- 一轮内的调用以 `assistant.tool_calls` + `role:'tool'`（带 `tool_call_id`）出现在 messages 中，**只在该轮请求链里使用，不持久化、不回放**
+- 参数由后端校验；`strict` 模式需走 `/beta` 且所有 object 的 `additionalProperties:false`、属性全 required，暂不启用
+- 限制：Chat Completion 不支持在历史中间插入工具调用（官方说明）；需要时改用 Responses API
+- 注意：开启思考模式且带 `tools` 时，后续请求必须回传 `reasoning_content`，否则 400；聊天计划关闭思考，暂不受影响
+- 服务端工具 `deepseek_read_url` 与客户端 function tools 能否同时声明需实测；冲突时聊天优先保留 `read_url`
+
+流式输出：
+
+- `stream:true` → SSE，增量在 `choices[0].delta`，以 `data: [DONE]` 结束；`stream_options.include_usage` 取末帧 usage
+- 工具循环每一轮是独立的流；轮与轮之间前端显示状态（如"正在查阅 11 月的记录…"），不把工具结果直接展示
+- 流式参数的 `tool_calls` 按 `index` 拼接 `function.arguments`，拼接完再解析 JSON
+
+提议与确认：
+
+- proposal 落库（`chat_proposals`：id、message_id、type、payload、status、created_at、expires_at）
+- 状态：`pending` → `confirmed` / `dismissed` / `superseded`
+- **确认不占用连接**：用户点按钮才发一次确认请求；用户直接输入新问题时，把该会话所有 `pending` 标记为 `superseded`
+- 刷新/换设备后仍能看到待确认项；过期（如 7 天）自动置 `dismissed`
+
+生成与断线：
+
+- 推荐把"一轮生成"与 HTTP 请求解耦：`POST /messages` 建 `chat_runs` 行并立即返回 `runId`（202），生成在后台执行，前端通过 SSE 订阅或轮询
+- 客户端被杀、切后台、断网都不影响服务端完成；回来时按 `runId` 或消息列表补全结果
+- 服务重启时，把 `running` 的 run 标记为 `failed`，前端提示重试
+- 若暂不引入 `chat_runs`：可先保留同步接口，服务端在客户端断开后仍会完成并落库，重新进入时靠拉取消息补全；缺点是丢失流式过程
+
 **分期**
 
 - [ ] P0：改 messages 结构（历史出 system、真实 role、稳定前缀）
 - [ ] P1：主动读工具 + 工具循环 + 上限
 - [ ] P2：会话滚动摘要 + `couple_memory` 真摘要
-- [ ] P3：写协议（proposal 解析 + 前端确认 + 三类落库）
-- [ ] 前置实测：服务端工具 `deepseek_read_url` 与客户端 function calling 能否同时声明；若冲突，聊天优先保留 read_url
+- [ ] P3：写协议（proposal 工具 + 确认接口 + 三类落库）
+- [ ] P4：流式输出 + run 生命周期（断线补全）
+- [ ] 前置实测：服务端工具与客户端 function tools 共存；流式下的 tool_calls 拼接
 
 ### 3. 私密记录标签（配合双人分析）
 
