@@ -88,6 +88,8 @@
 - [ ] `couple_key` = 两个 user_id 排序后拼接，不新建关系表，避免双份状态不一致
 - [ ] 双人记忆：`couple_memory`（couple_key、summary、covered_until、updated_at），记录上次分析覆盖到哪一天
 - [ ] 问答：`chat_sessions`（user_id、title、created_at）、`chat_messages`（session_id、role、content、refs、created_at）
+- [ ] Facts：`facts`（user_id、content、confidence、source、source_ref_id、couple_visible、pinned、created_at、updated_at），详见 §2.10
+- [ ] AI 标签：`record_tags`（record_id、tag_type、content、source、source_ref_message_id、couple_visible、created_at、created_by_user_id），详见 §2.11
 - [ ] 查询接口：按周期读取并做权限校验；双人结果仅**当前互惠 full** 的双方可见
 - [ ] 单人报告幂等：同用户同周只生成一次；双人同周期默认复用，需显式重新生成
 
@@ -115,6 +117,125 @@
 - [ ] 双人报告定时的默认值：关闭 / 每周 / 每月
 - [ ] 问答是否引用对方授权可见的原始记录，还是只引用双人报告结论（当前按可引用设计）
 - [ ] 问答的月度调用上限与超额提示
+
+#### 2.10 Facts 个人持久记忆（2026-11-20 引入）
+
+**动机**：对话上下文压缩时必然丢失细节，需要独立于 context window 的持久层存储"关于我自己的稳定事实"。业界共识是**长程记忆应独立存储、按需检索注入**（Mastra.ai 长程记忆架构；豆包对话自动提炼记忆；小红书点点 512K 长上下文配合 agent 底座）。
+
+**设计原则**：
+
+- 事实必须**可编辑**、**可删除**、**可标记重要**——类似豆包的记忆管理，用户对 agent 记住什么有完全控制权
+- Agent **不自动静默写**事实：提取时必须在对话里显式提示"要不要记住这件事？"，用户点头才入库；用户也可以主动说"记住：我讨厌香菜"
+- 置信度 + 来源：从"我主动告诉你"提取的事实置信度高，从"我提到过"推断的置信度低；用户可手动调高/调低
+- 双人可见性独立标记：同一事实可能"我愿意让 agent 记住，但不想让双人报告用"，所以每条 facts 有 `couple_visible` 开关，默认关
+
+**存储**：
+
+```
+facts(id, user_id, content, confidence(1-5), source('user'|'agent_extracted'|'report_derived'), 
+      source_ref_id, couple_visible INTEGER DEFAULT 0, pinned INTEGER DEFAULT 0, created_at, updated_at)
+```
+
+- `source_ref_id`：从哪条对话/记录/报告提取的，便于溯源和调试
+- `couple_visible=1` 的事实才可进入双人分析
+
+**写入触发点**：
+
+| 触发 | 行为 |
+|------|------|
+| 用户主动说「记住：...」或「别忘了...」 | agent 直接入库，置信度 5，couple_visible=0 |
+| 对话中出现稳定偏好/性格特征（如"我一直讨厌被催"） | agent 提示"要不要记住这件事？"，用户确认后入库，置信度 3，couple_visible=0 |
+| 单人报告生成后，从多周重复出现的模式中提炼 | 静默生成候选 facts（`status=pending`），不入库；用户在 Facts 管理页主动批准后才激活 |
+
+**读取策略**：
+
+- 问答 agent 每次对话前：检索 top 10 相关 facts（按 embedding 相似度 + pinned + confidence），注入 system prompt 的「关于用户的已知事实」段落
+- 单人报告生成时：全量注入 facts，让分析基于完整个人背景
+- 双人报告生成时：只注入双方 `couple_visible=1` 的 facts
+
+**隐私边界**：
+
+- Facts 永远属于个人，默认私有
+- 用户可以在 Facts 管理页逐条设置 `couple_visible`，但**不能指定让对方看某一条而不让 agent 自己看**
+- 问答中绝不泄露"对方有哪些 facts"，只能通过双人报告的结论间接体现
+
+#### 2.11 AI 标签（2026-11-20 引入）
+
+**动机**：对话中产生的洞察（如"我发现自己每次压力大就回避沟通"）应该附着回具体记录，让日历视图能在点球时看到 AI 建议，而不只是当时的原始理由。
+
+**设计原则**：
+
+- **agent 绝不自动去打标签**。必须是用户在对话里主动触发的——比如用户说"我觉得我周三那次反应过度了"，agent 回应后问"要不要给周三的记录加个标签？"，用户点头才写
+- 标签与原始记录解耦存储，不修改原始 `note` 字段（和修订痕迹方案一致：改记录要显式操作）
+- UI 视觉区分：AI 标签用不同颜色/图标，折叠在「AI 建议」区块，不跟原始理由混排
+- 私密记录继承私密：如果原始记录 `is_private=1`，上面的 AI 标签默认也不进入双人报告（除非 `couple_visible` 显式开）
+
+**存储**：
+
+```
+record_tags(id, record_id, tag_type('insight'|'suggestion'|'pattern'|'correction'), 
+            content, source('user'|'agent'), source_ref_message_id, couple_visible INTEGER DEFAULT 0, 
+            created_at, created_by_user_id)
+```
+
+- 一条记录可以有多条标签
+- `source_ref_message_id`：来自哪条对话消息，便于溯源
+- 标签也可以被用户单独删除（不影响原始记录）
+
+**UI 行为**：
+
+- 日历视图：点球展开详情，下方出现「AI 建议」区块；若没有标签则不显示这个区块
+- 标签按时间倒序，可单独删除
+- 和 Facts 联动：一个标签如果在多条记录上重复出现，agent 可以提议"要不要把这个总结成一条 Facts？"
+
+**双人报告读取**：
+
+- 只读取双方 `couple_visible=1` 的 AI 标签
+- 标签以"聚合后"的形式进入双人报告（如"双方均多次提到沟通回避"），不逐条罗列
+
+#### 2.12 双人报告增强路线（2026-11-20 定，分阶段）
+
+**短期（本项目先做阶段一）：增强上下文的单 agent**
+
+双人报告仍然是**单个模型调用**，但输入除了原始记录，还叠加：
+
+- 双方 `couple_visible=1` 的 facts
+- 双方 `couple_visible=1` 的 AI 标签（聚合后）
+- 双方最近的单人报告摘要
+- 上次双人报告的记忆（现有 `couple_memory`）
+- 模糊化元信息（私密理由数量/比例，仅用于不确定性校准）
+
+这一阶段不做多 agent 对谈，成本可控，收益直接——facts 和 AI 标签先落地，本身就能显著提升报告质量。
+
+**长期（facts + 标签跑通后再评估）：多 agent 对谈**
+
+参考 RELATE-Sim 和 LoveSims 两篇学术框架的思路，但做工程化裁剪：
+
+```
+[用户 A 的 persona] ←→ [用户 B 的 persona]
+         ↓                        ↓
+  A 的 facts + AI标签          B 的 facts + AI标签
+         ↓                        ↓
+     对谈 moderator（引导 agent）
+         ↓
+  总结 agent → 产出双人报告（含对谈过程摘要）
+```
+
+**关键约束（必须满足才考虑实现）**：
+
+1. **隐私隔离**：A 的 persona agent 只能读 A 的 facts + A 的 AI 标签 + 双方原始记录（full 档），**绝对不能读 B 的 facts**。B 的 agent 对称。这是 RELATE-Sim 的 "No Mind Reading" 原则
+2. **对谈可见性**：两个 agent 的"内心想法"不进入报告，只有它们**互相说出来的话**（对谈 transcript 中标记为 `public` 的部分）才被总结 agent 消费
+3. **成本评估**：至少 3 次 LLM 调用（两个 persona 各一次准备 + moderator 引导 + 总结），约 3-5 倍于单 agent。先看阶段一的实际成本和质量，再决定值不值
+4. **首次触发门槛**：双方如果都没有个人报告/AI 标签，先**自动各跑一次单人分析**，拿到 persona 素材后再开始对谈——对谈至少建立在"双方 agent 各自理解自己"的基础上，否则是无的放矢
+
+**为什么短期不做多 agent 对谈**：
+
+- 事实层面：现在还没有 facts 和 AI 标签，agent 对谈缺素材
+- 成本层面：在还不知道单 agent + 增强上下文能做到什么程度之前，多 agent 是 premature optimization
+- 可调试性：链路越长越难定位问题（两个 agent 矛盾、moderator 引导失败、总结 agent 漏点）
+- 工程复杂度：需要引入 persona 生成、对谈轮次控制、超时/中断恢复、结果仲裁等一整套机制
+
+**阶段一先跑，跑出实际数据再决定阶段二要不要做。**
 
 #### 2.9 联网检索与模型选型（2026-11-19 调研）
 
