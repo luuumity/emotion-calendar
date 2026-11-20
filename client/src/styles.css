@@ -2663,6 +2663,8 @@ p {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 
 .chat-title-inline {
@@ -2711,9 +2713,9 @@ p {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  position: sticky;
-  top: 88px;
-  max-height: calc(100vh - 120px);
+  align-self: start;
+  height: min(58vh, 420px);
+  margin: 14px;
 }
 
 .chat-session-head {

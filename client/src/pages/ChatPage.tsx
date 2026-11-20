@@ -88,6 +88,29 @@ export function ChatPage() {
     }
   }
 
+  async function deleteSession(id: number, e?: React.MouseEvent) {
+    e?.stopPropagation?.()
+    const target = sessions.find((s) => s.id === id)
+    if (!target) return
+    if (!confirm(`删除"${target.title}"这个对话？（不可恢复）`)) return
+    try {
+      await api.deleteChatSession(id)
+      const next = sessions.filter((s) => s.id !== id)
+      setSessions(next)
+      if (activeId === id) {
+        const fallback = next[0]?.id ?? null
+        if (fallback) {
+          await selectSession(fallback)
+        } else {
+          setActiveId(null)
+          setMessages([])
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '删除失败')
+    }
+  }
+
   // 初始加载：拉列表，如果没有任何 session 就自动建一个空的新会话
   useEffect(() => {
     ;(async () => {
@@ -213,6 +236,15 @@ export function ChatPage() {
                     <strong>{s.title}</strong>
                     <span>{formatTime(s.updatedAt)}</span>
                   </div>
+                  <button
+                    type="button"
+                    className="chat-session-del"
+                    title="删除这个对话"
+                    aria-label="删除这个对话"
+                    onClick={(e) => deleteSession(s.id, e)}
+                  >
+                    🗑
+                  </button>
                 </div>
               ))
             )}
