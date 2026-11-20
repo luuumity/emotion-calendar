@@ -9,6 +9,7 @@ import { callDeepSeek } from '../lib/llm.js'
 import { ensureCompressed } from '../lib/compress.js'
 import { getDefaultSystemPrompt } from '../lib/persona.js'
 import { buildChatMessages } from '../lib/prompts/chat.js'
+import { FUNCTION_TOOLS, executeTool } from '../lib/tools.js'
 
 const router = Router()
 router.use(requireUser)
@@ -176,6 +177,71 @@ function buildFactsBlock(userId) {
   return '【关于用户的稳定事实】\n' + facts.map((f) => `- ${f.content}`).join('\n')
 }
 
+// 纯防失控的安全阈值，不是产品级限制
+const MAX_TOOL_STEPS = 8
+
+function mergeUsage(total, usage) {
+  if (!usage) return total
+  return {
+    prompt_tokens: (total.prompt_tokens || 0) + (usage.prompt_tokens || 0),
+    completion_tokens: (total.completion_tokens || 0) + (usage.completion_tokens || 0),
+    total_tokens: (total.total_tokens || 0) + (usage.total_tokens || 0)
+  }
+}
+
+/**
+ * 工具循环：模型可调用 get_days / get_tags 按需取数。
+ * 相同参数的重复调用直接拒绝，避免原地打转。
+ */
+async function runWithTools(baseMessages, userId) {
+  const work = [...baseMessages]
+  const seen = new Set()
+  let usage = {}
+
+  for (let step = 0; step < MAX_TOOL_STEPS; step++) {
+    const result = await callDeepSeek(work, { functions: FUNCTION_TOOLS })
+    usage = mergeUsage(usage, result.usage)
+
+    if (!result.toolCalls) return { content: result.content, usage }
+
+    const assistantMsg = { role: 'assistant', content: result.message.content ?? '', tool_calls: result.toolCalls }
+    // 思考模式下，带 tool_calls 的 assistant 消息必须把 reasoning_content 原样带回去
+    if (result.message.reasoning_content) assistantMsg.reasoning_content = result.message.reasoning_content
+    work.push(assistantMsg)
+
+    for (const call of result.toolCalls) {
+      const name = call.function?.name
+      const rawArgs = call.function?.arguments || '{}'
+      const key = `${name}:${rawArgs}`
+
+      let output
+      if (seen.has(key)) {
+        output = JSON.stringify({
+          ok: false,
+          reason: 'duplicate_call',
+          hint: '同样的查询已经执行过，请缩小范围或换一种查法。'
+        })
+      } else {
+        seen.add(key)
+        let args = {}
+        try {
+          args = JSON.parse(rawArgs)
+        } catch {
+          args = {}
+        }
+        output = executeTool(name, args, userId)
+      }
+
+      work.push({ role: 'tool', tool_call_id: call.id, content: output })
+    }
+  }
+
+  // 步数用尽：不再提供任何工具，强制基于已有信息收尾
+  const final = await callDeepSeek(work, { tools: false })
+  usage = mergeUsage(usage, final.usage)
+  return { content: final.content, usage }
+}
+
 router.post('/sessions/:id/messages', async (req, res) => {
   const id = toInt(req.params.id)
   if (!id) return res.status(400).json({ error: '无效的会话编号' })
@@ -245,7 +311,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
   })
 
   try {
-    const result = await callDeepSeek(messages)
+    const result = await runWithTools(messages, req.user.id)
 
     // 5. 存 assistant 回复
     const assistantInfo = db

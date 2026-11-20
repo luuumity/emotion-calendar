@@ -24,7 +24,8 @@ export function hasDeepSeekKey() {
  * @param {number} [opts.maxTokens]
  * @param {number} [opts.temperature]
  * @param {Array<object>|false} [opts.tools] 服务端工具；默认声明 deepseek_read_url，传 false 可关闭
- * @returns {Promise<{content: string, usage: {prompt_tokens: number, completion_tokens: number, total_tokens: number}, model: string}>}
+ * @param {Array<object>} [opts.functions] 客户端 function calling 工具
+ * @returns {Promise<{content: string, toolCalls: Array|null, message: object, usage: object, model: string}>}
  */
 export async function callDeepSeek(messages, opts = {}) {
   if (!HAS_KEY) {
@@ -32,10 +33,15 @@ export async function callDeepSeek(messages, opts = {}) {
     console.warn('[llm] DEEPSEEK_API_KEY 未配置，返回占位内容')
     return {
       content: '[AI 服务未配置，返回占位内容。请在服务器设置 DEEPSEEK_API_KEY 环境变量。]',
+      toolCalls: null,
+      message: { role: 'assistant', content: '' },
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       model: MODEL
     }
   }
+
+  const serverTools = opts.tools === false ? [] : opts.tools || DEFAULT_TOOLS
+  const tools = [...serverTools, ...(opts.functions || [])]
 
   const payload = {
     model: opts.model || MODEL,
@@ -43,7 +49,7 @@ export async function callDeepSeek(messages, opts = {}) {
     stream: false,
     temperature: opts.temperature ?? 0.7,
     ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
-    ...(opts.tools === false ? {} : { tools: opts.tools || DEFAULT_TOOLS })
+    ...(tools.length ? { tools } : {})
   }
 
   const resp = await fetch(`${BASE_URL}/chat/completions`, {
@@ -61,8 +67,11 @@ export async function callDeepSeek(messages, opts = {}) {
   }
 
   const data = await resp.json()
+  const message = data.choices?.[0]?.message || {}
   return {
-    content: data.choices?.[0]?.message?.content ?? '',
+    content: message.content ?? '',
+    toolCalls: Array.isArray(message.tool_calls) && message.tool_calls.length ? message.tool_calls : null,
+    message,
     usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     model: data.model || MODEL
   }
