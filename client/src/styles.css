@@ -2772,12 +2772,13 @@ p {
 .chat-session-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
   cursor: pointer;
   transition: background 0.15s ease;
   position: relative;
+  min-height: 0;
 }
 
 .chat-session-item:hover {
