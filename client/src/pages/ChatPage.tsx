@@ -137,13 +137,8 @@ export function ChatPage() {
 
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    // 移动端中文拼音输入法按回车选字时，会在 composing 阶段发 Enter；跳过它
-    if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent as unknown as { isComposing?: boolean }).isComposing) {
-      e.preventDefault()
-      send()
-    }
-  }
+  // 纯按钮触发发送。回车/Shift+回车都换行，符合移动端输入法直觉
+  // （之前保留了 Shift+Enter=换行，Enter=发送的桌面规则；现在统一：点按钮才发）
 
   return (
     <div className="page chat-page">
@@ -171,13 +166,9 @@ export function ChatPage() {
             <button type="button" className="icon-btn small" onClick={createAndSelect} title="新建对话">+</button>
           </div>
 
-          <button type="button" className={'chat-session-new ' + (activeId === null ? 'active' : '')} onClick={createAndSelect}>
-            ＋ 开启新对话
-          </button>
-
           <div className="chat-sessions-scroll">
             {sessions.length === 0 ? (
-              <p className="list-empty">还没有会话，点上面按钮开一个吧。</p>
+              <p className="list-empty">还没有会话。</p>
             ) : (
               sessions.map((s) => (
                 <div
@@ -190,19 +181,8 @@ export function ChatPage() {
                 >
                   <div className="chat-session-item-main">
                     <strong>{s.title}</strong>
-                    <span>{s.messageCount} 条 · {formatTime(s.updatedAt)}</span>
+                    <span>{formatTime(s.updatedAt)}</span>
                   </div>
-                  <button
-                    type="button"
-                    className="chat-session-del"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      deleteSession(s.id)
-                    }}
-                    title="删除"
-                  >
-                    ✕
-                  </button>
                 </div>
               ))
             )}
@@ -212,19 +192,13 @@ export function ChatPage() {
         <main className="chat-window">
           {!activeSession ? (
             <div className="chat-empty">
-              <h3>开始第一段对话</h3>
-              <p>点左上角「＋」或者「开启新对话」，就可以和 Persona Agent 聊天了。</p>
               <button type="button" className="primary-btn" onClick={createAndSelect}>
-                开启新对话
+                ＋ 开启新对话
               </button>
+              <p>点上面按钮就能和 Persona Agent 聊天了。</p>
             </div>
           ) : (
             <>
-              <header className="chat-window-head">
-                <strong>{activeSession.title}</strong>
-                <span>{activeSession.messageCount} 条消息</span>
-              </header>
-
               <div className="chat-messages" ref={listRef}>
                 {messages.length === 0 && !sending && (
                   <div className="chat-empty-inline">
@@ -253,7 +227,6 @@ export function ChatPage() {
                   value={input}
                   disabled={sending}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={onKeyDown}
                 />
                 <button
                   type="button"
