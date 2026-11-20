@@ -9,7 +9,7 @@ export function buildSingleReportMessages({ personaBlock, periodStart, periodEnd
   const system = `${personaBlock}
 
 ===== 任务 =====
-请基于以下 ${periodStart} ~ ${periodEnd} 的情绪记录，为用户生成一份自我洞察报告。
+请基于用户本周期（${periodStart} ~ ${periodEnd}）的情绪记录，为用户生成一份自我洞察报告。
 
 结构（用中文，标题加粗，200-400 字）：
 1. **整体倾向**：平均分数、波动程度、是上升/下降/平稳
@@ -21,9 +21,13 @@ export function buildSingleReportMessages({ personaBlock, periodStart, periodEnd
 - 不评判，只描述你观察到的
 - 如果记录很少（< 3 天），坦诚说"样本还少，我们下次再多一点数据"
 - 如果有记录被事后调整过分值，请在分析中把这个调整当作信号（用户自己觉得当时的感受有偏差）
+- 理由中可能包含链接：读到内容就结合内容分析，读不到就只依据用户自己写的理由，不要编造链接内容`
 
-===== ${periodStart} ~ ${periodEnd} 的情绪记录 =====
-${recordBlock}`
-
-  return [{ role: 'system', content: system }]
+  return [
+    { role: 'system', content: system },
+    {
+      role: 'user',
+      content: `===== ${periodStart} ~ ${periodEnd} 的情绪记录 =====\n${recordBlock}`
+    }
+  ]
 }

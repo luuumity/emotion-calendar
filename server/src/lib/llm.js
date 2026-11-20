@@ -8,6 +8,9 @@ const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
 const API_KEY = process.env.DEEPSEEK_API_KEY
 const HAS_KEY = Boolean(API_KEY)
 
+// 服务端工具：模型可自行读取最后一条 user 消息中的链接。不按次计费，只算 token
+const DEFAULT_TOOLS = [{ type: 'deepseek_read_url' }]
+
 export function hasDeepSeekKey() {
   return HAS_KEY
 }
@@ -20,7 +23,7 @@ export function hasDeepSeekKey() {
  * @param {string} [opts.model]
  * @param {number} [opts.maxTokens]
  * @param {number} [opts.temperature]
- * @param {string[]} [opts.tools] 暂时不支持 function calling
+ * @param {Array<object>|false} [opts.tools] 服务端工具；默认声明 deepseek_read_url，传 false 可关闭
  * @returns {Promise<{content: string, usage: {prompt_tokens: number, completion_tokens: number, total_tokens: number}, model: string}>}
  */
 export async function callDeepSeek(messages, opts = {}) {
@@ -39,7 +42,8 @@ export async function callDeepSeek(messages, opts = {}) {
     messages,
     stream: false,
     temperature: opts.temperature ?? 0.7,
-    ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {})
+    ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+    ...(opts.tools === false ? {} : { tools: opts.tools || DEFAULT_TOOLS })
   }
 
   const resp = await fetch(`${BASE_URL}/chat/completions`, {
