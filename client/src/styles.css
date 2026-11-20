@@ -2654,10 +2654,40 @@ p {
   border-bottom: 1px solid var(--line);
   background: var(--bg);
   flex-shrink: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.chat-page > .page-head .sub {
-  display: none; /* 聊一聊页标题下方的描述藏掉，让页面紧凑 */
+.chat-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-title-inline {
+  margin: 0;
+  font-size: 17px;
+}
+
+.chat-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 侧边栏弹层的遮罩 */
+.chat-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(47, 42, 37, 0.28);
+  z-index: 50;
+  animation: fadeIn 0.18s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .chat-sidebar-toggle {

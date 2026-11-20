@@ -22,6 +22,23 @@ export function ChatPage() {
   const [hint, setHint] = useState<string | null>(null)
 
   const listRef = useRef<HTMLDivElement>(null)
+  const sidebarRef = useRef<HTMLElement | null>(null)
+
+  // 侧边栏打开时，点外面自动收起（遮罩）
+  useEffect(() => {
+    if (!sidebarOpen) return
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as Node
+      if (sidebarRef.current && !sidebarRef.current.contains(t)) {
+        const btn = document.querySelector('.chat-sidebar-toggle')
+        if (!btn || !btn.contains(t)) {
+          setSidebarOpen(false)
+        }
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [sidebarOpen])
 
   async function loadSessions() {
     try {
@@ -143,11 +160,18 @@ export function ChatPage() {
   return (
     <div className="page chat-page">
       <div className="page-head">
-        <div>
-          <h1>聊一聊</h1>
-          <p className="sub">和懂你的 Persona Agent 聊聊吧——它读过你的情绪日记、标签和过往分析。</p>
+        <div className="chat-head-left">
+          <button
+            type="button"
+            className="ghost-btn small chat-sidebar-toggle"
+            onClick={() => setSidebarOpen((v) => !v)}
+            aria-label="切换会话列表"
+          >
+            {sidebarOpen ? '收起' : '会话列表'}
+          </button>
+          <h1 className="chat-title-inline">聊一聊</h1>
         </div>
-        <div className="chat-head-actions">
+        <div className="chat-head-right">
           <button
             type="button"
             className="ghost-btn small"
@@ -157,14 +181,6 @@ export function ChatPage() {
           >
             ＋ 新对话
           </button>
-          <button
-            type="button"
-            className="ghost-btn small chat-sidebar-toggle"
-            onClick={() => setSidebarOpen((v) => !v)}
-            aria-label="切换会话列表"
-          >
-            {sidebarOpen ? '收起' : '会话'}
-          </button>
         </div>
       </div>
 
@@ -172,7 +188,10 @@ export function ChatPage() {
       {hint && <div className="banner info">{hint}</div>}
 
       <div className="chat-layout">
-        <aside className={'chat-session-list ' + (sidebarOpen ? 'open' : '')}>
+        {sidebarOpen && (
+          <div className="chat-sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-hidden />
+        )}
+        <aside ref={sidebarRef} className={'chat-session-list ' + (sidebarOpen ? 'open' : '')}>
           <div className="chat-session-head">
             <span className="chat-session-title">历史会话</span>
           </div>
@@ -213,7 +232,7 @@ export function ChatPage() {
               <div className="chat-messages" ref={listRef}>
                 {messages.length === 0 && !sending && (
                   <div className="chat-empty-inline">
-                    给 Persona Agent 写点什么吧。它会参考你的情绪记录和 facts 来回应你。
+                    它读过你的情绪日记、标签和过往分析，跟它聊聊吧。
                   </div>
                 )}
 
