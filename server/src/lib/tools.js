@@ -160,7 +160,7 @@ export const FUNCTION_TOOLS = [
         properties: {
           day: { type: 'string', description: '日期 YYYY-MM-DD，不能晚于今天' },
           score: { type: 'integer', description: '感受值 0-100 的整数，必须来自用户' },
-          note: { type: 'string', description: '理由，可选，最多 2000 字' }
+          note: { type: 'string', description: '理由，可选，最多 2000 字；可以基于用户的话总结' }
         },
         required: ['day', 'score']
       }
@@ -435,13 +435,18 @@ function proposeRecord(ctx, args) {
     return { ok: false, reason: 'bad_args', hint: '不能创建未来日期的记录' }
   }
 
-  const score = Number(args?.score)
+  // 只接受数字或纯数字字符串；null / '' / 布尔 / 数组不能悄悄变成 0
+  let score = null
+  if (typeof args?.score === 'number') score = args.score
+  else if (typeof args?.score === 'string' && /^\d+$/.test(args.score.trim())) score = Number(args.score.trim())
   if (!Number.isInteger(score) || score < 0 || score > 100) {
     return { ok: false, reason: 'bad_args', hint: 'score 需要是 0-100 的整数，并且必须来自用户' }
   }
 
-  const rawNote = args?.note === undefined || args.note === null ? '' : String(args.note)
-  const note = rawNote.trim()
+  if (args?.note !== undefined && args?.note !== null && typeof args.note !== 'string') {
+    return { ok: false, reason: 'bad_args', hint: 'note 需要是文本' }
+  }
+  const note = typeof args?.note === 'string' ? args.note.trim() : ''
   if (note.length > 2000) return { ok: false, reason: 'bad_args', hint: '理由不能超过 2000 字' }
 
   return insertProposal(ctx, 'record', { day, score, note })

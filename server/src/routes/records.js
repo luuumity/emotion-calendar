@@ -19,12 +19,21 @@ function toDate(day) {
 }
 
 function toScore(input) {
-  const score = Number(input)
+  // 只接受数字或纯数字字符串；null / '' / 布尔 / 数组不能悄悄变成 0
+  let score = null
+  if (typeof input === 'number') score = input
+  else if (typeof input === 'string' && /^\d+$/.test(input.trim())) score = Number(input.trim())
   return Number.isInteger(score) && score >= 0 && score <= 100 ? score : null
 }
 
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
 function toNote(input) {
-  return typeof input === 'string' ? input.slice(0, NOTE_LIMIT) : null
+  if (input === undefined || input === null) return ''
+  if (typeof input !== 'string' || input.length > NOTE_LIMIT) return null
+  return input
 }
 
 function view(row) {
@@ -55,11 +64,13 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const day = toDate(req.body?.day)
   if (!day) return res.status(400).json({ error: '日期格式应为 YYYY-MM-DD' })
+  if (day > shanghaiToday()) return res.status(400).json({ error: '日期不能晚于今天' })
 
   const score = toScore(req.body?.score)
   if (score === null) return res.status(400).json({ error: '感受值需为 0-100 的整数' })
 
-  const note = toNote(req.body?.note) ?? ''
+  const note = toNote(req.body?.note)
+  if (note === null) return res.status(400).json({ error: '理由需为不超过 2000 字的文本' })
   const now = new Date().toISOString()
 
   const info = db
@@ -103,7 +114,7 @@ router.put('/:id', (req, res) => {
 
   if (hasNote) {
     const nextNote = toNote(req.body.note)
-    if (nextNote === null) return res.status(400).json({ error: '理由需为文本' })
+    if (nextNote === null) return res.status(400).json({ error: '理由需为不超过 2000 字的文本' })
     if (nextNote !== existing.note) {
       note = nextNote
       updatedAt = now

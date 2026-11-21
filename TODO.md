@@ -627,6 +627,11 @@ propose_record({ day, score, note? })
 - [x] 前置实测：服务端工具与客户端 function tools 共存（可用）；`deepseek_read_url` 对 B 站可用、对小红书被拦
 - [ ] 前置实测：流式下的 `tool_calls` 分片拼接（等 P4）
 
+**已知遗留**
+
+- 日期判断统一用 `shanghaiToday()` 硬编码 UTC+8，没有读 `users.timezone`。受影响的位置：`propose_record` 的未来日期校验、采纳时的未来日期校验、`records` 直接创建的未来日期校验、聊天记忆块里的「今天是」、以及前端日期卡片的 `max`。当前产品只面向中国时区，等支持海外时区时统一改为按用户时区计算。
+- `records` 的 `POST` / `PUT` 与采纳接口对理由长度都返回 400（>2000 字），不再静默截断；前端页面用 `maxLength` 提前限制。
+
 ### 3. 私密记录标签（配合双人分析）
 
 - [ ] `records` 增加 `is_private` 字段，默认 0；创建时可设置，之后也允许修改

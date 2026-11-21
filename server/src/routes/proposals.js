@@ -190,18 +190,27 @@ function recordView(row) {
   }
 }
 
+function toScore(input) {
+  // 只接受数字或纯数字字符串；null / '' / 布尔 / 数组不能悄悄变成 0
+  let score = null
+  if (typeof input === 'number') score = input
+  else if (typeof input === 'string' && /^\d+$/.test(input.trim())) score = Number(input.trim())
+  return Number.isInteger(score) && score >= 0 && score <= 100 ? score : null
+}
+
 function acceptRecord(row, override) {
   const payload = parsePayload(row) || {}
   const day = String(override?.day !== undefined ? override.day : payload.day || '')
   if (!isValidDay(day)) return { error: '日期格式应为 YYYY-MM-DD', status: 400 }
   if (day > shanghaiToday()) return { error: '日期不能晚于今天', status: 400 }
 
-  const score = Number(override?.score !== undefined ? override.score : payload.score)
-  if (!Number.isInteger(score) || score < 0 || score > 100) {
-    return { error: '分值需为 0-100 的整数', status: 400 }
-  }
+  const score = toScore(override?.score !== undefined ? override.score : payload.score)
+  if (score === null) return { error: '分值需为 0-100 的整数', status: 400 }
 
   const rawNote = override?.note !== undefined ? override.note : payload.note
+  if (rawNote !== undefined && rawNote !== null && typeof rawNote !== 'string') {
+    return { error: '理由需为文本', status: 400 }
+  }
   const note = typeof rawNote === 'string' ? rawNote.trim() : ''
   if (note.length > 2000) return { error: '理由不能超过 2000 字', status: 400 }
 
