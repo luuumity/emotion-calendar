@@ -447,3 +447,47 @@ systemctl stop emotion-calendar
 cp backups/pre-migrate-vN-<时间>.db data/emotion.db
 systemctl start emotion-calendar
 ```
+
+## 15. 交接清单
+
+仓库是公开的，**任何密钥、口令、`.env` 内容都不要写进仓库**。交接时按下表逐项移交，只核对名称和位置。
+
+### 账号与权限
+
+- [ ] GitHub 仓库 `luuumity/emotion-calendar` 的读写权限（当前是公开仓库，克隆走 HTTPS 即可）
+- [ ] 服务器 `root@43.103.44.162` 的 SSH 登录方式，或替代的管理通道
+- [ ] 域名 `emotion.cinnamon.xin` 的注册商 / DNS 控制台
+- [ ] 证书续期：`certbot.timer` 所在机器与证书路径
+- [ ] DeepSeek 开放平台账号与 API Key（模型调用）
+- [ ] 阿里云 OSS 的 RAM 用户、Bucket、`acs:SourceIp` 策略（异地备份）
+
+### 服务器上的文件
+
+- [ ] `/opt/emotion-calendar/.env.production`（`PORT`、`HOST`、`COOKIE_SECURE`、`DEEPSEEK_*`、`VAPID_*`；权限 600）
+- [ ] `/opt/emotion-calendar/data/jwt-secret.txt`（丢失只会导致所有人重新登录）
+- [ ] `/etc/systemd/system/emotion-calendar.service`
+- [ ] `/etc/nginx/sites-available/emotion-calendar.conf` 及其 `sites-enabled` 软链
+- [ ] `/usr/local/bin/emotion-backup.sh`（全文见 §11）
+- [ ] `/etc/emotion-backup/oss.env`、可选的 `/etc/emotion-backup/gpg-passphrase`
+- [ ] root crontab 的两条备份任务（`crontab -l`，时间见 §11）
+
+### 数据
+
+- [ ] `/opt/emotion-calendar/data/emotion.db`（含 `-wal`、`-shm`）
+- [ ] `/opt/emotion-calendar/backups/` 中最近的本地备份
+- [ ] OSS `oss://<bucket>/backups/` 中最近的异地备份
+
+### 接手后验证
+
+```bash
+systemctl is-enabled emotion-calendar
+systemctl status emotion-calendar --no-pager
+curl -s http://127.0.0.1:3100/api/health
+curl -sI https://emotion.cinnamon.xin | head -1
+crontab -l
+tail -3 /var/log/emotion-backup.log /var/log/emotion-oss-backup.log
+```
+
+浏览器里再走一遍：登录 → 月视图有数据 → 聊一聊发送“请记住：我不喜欢香菜”能出现待确认卡片 → 设置 → 长期记忆可打开。
+
+人员变更时建议轮换 `DEEPSEEK_API_KEY`、OSS AccessKey、服务器 SSH key；更换 VAPID 密钥会让所有推送订阅失效，非泄露不要换。

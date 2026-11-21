@@ -56,7 +56,7 @@ npm run dev
 
 ## 生产部署
 
-> 针对 `cinnamon.xin` 服务器的完整操作手册见 [DEPLOY.md](./DEPLOY.md)（含 Node 安装、systemd、Nginx、HTTPS、备份与更新流程）。
+> 针对 `cinnamon.xin` 服务器的完整操作手册见 [DEPLOY.md](./DEPLOY.md)（含 Node 安装、systemd、Nginx、HTTPS、备份与更新流程、§15 交接清单）。
 
 服务器上只需要：**Node 22+ 或 Docker**、**已解析到服务器的域名**、**80/443 端口**。HTTPS 证书可以用 Let's Encrypt 免费签发。
 
