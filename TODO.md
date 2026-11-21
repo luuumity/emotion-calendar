@@ -2,30 +2,32 @@
 
 产品与体验待办。运维/备份待办见 [OSS-TODO.md](./OSS-TODO.md)。
 
-## 当前实现状态（2026-11-20 核对）
+## 当前实现状态（2026-11-21 核对）
 
-代码、GitHub `main`、服务器三者一致（`974e8cd`），服务 `active`。
+代码、GitHub `main`、服务器三者一致（`8bf9083`），服务 `active`。
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
-| 数据库迁移 v6 | 已完成 | 新增 `chat_sessions.summary` / `summary_until_id` |
-| 会话压缩摘要 | 已完成 | 超过 12 条未压缩消息时压成滚动摘要，保留最近 6 条；失败降级为截断 |
+| 数据库迁移 v9 | 已完成 | v9 重建 `chat_proposals`（`record` / `expired` / `edited` / `final_payload`）；v7 记录 `prompt_tokens` / `prompt_chars`；v6 会话摘要 |
+| 会话压缩摘要 | 已完成 | 未压缩历史估算 token > 4000 或消息 > 40 条时压缩，保留最近 6 条；用实测 usage 校准比例；失败降级 |
+| 主动查询工具 | 已完成 | `get_days` / `get_tags` / `get_record` / `get_report`；单次结果 > 6000 字符返回提示；重复调用拒绝；8 步熔断 |
+| 提议闭环 | 已完成 | fact / tag / report 三类提议；卡片可编辑后采纳；新消息发送时剩余 pending 作废；处理结果以临时 system 汇总 |
+| 长期记忆页 | 已完成 | 设置页「长期记忆」tab：增删改、置顶、控制对另一半可见；聊天侧栏有入口 |
 | 数据库迁移 v5 | 已完成 | facts / record_tags / insights / couple_memory / chat_sessions / chat_messages |
 | 分值微调（后端） | 已完成 | `PUT /api/records/:id` 接受 score；original_score / adjusted_at |
 | 分值微调（前端） | 已完成 | 滑杆 + −/+，「已调过」标记；**无 5 秒撤销** |
 | AI 分析页（单人/双人手动生成） | 已完成 | `/insights`；双人入口按互惠 full 档置灰 |
 | 聊一聊 | 已完成 | 会话新建/删除、自动标题（首条前 30 字） |
-| AI 标签展示 | 已完成 | 日视图展示；**agent 写入标签未做** |
+| AI 标签展示与写入 | 已完成 | 日视图展示；agent 通过 `propose_tag` 提议，确认后写入 |
 | `deepseek_read_url` | 已完成 | 聊天与报告恒定声明，只计 token；报告 prompt 已改为 system + user |
 | 模型 | 已完成 | 默认 `deepseek-v4-flash`（`deepseek-chat` 已于 2026-07-24 弃用） |
 | 图像理解 + Files API | 待做 | 截图作为理由/对话输入；默认仅自己可见 |
-| usage 记账 / 缓存前缀 / 思考开关 | 待做 | 见 §2.13 |
+| usage 记账 / 缓存前缀 / 思考开关 | 待做 | 见 §2.13；prompt 规模已落库，completion 成本未记账 |
 | JSON 输出 / OCR | 暂缓 | 用途未定，见 §2.13 |
 | Persona 专业化 | 暂缓 | 仅记录思路，见 §2.14 |
 | 定时报告 / 每日聚合 | 未做（方案已定） | systemd timer 每小时跑 `sweep-insights.mjs`，见 §2.1 |
-| 聊天 token 记账 | 未做 | `chat_messages` 需增加 prompt/completion tokens |
+| 聊天 token 记账 | 部分完成 | 已存末次 `prompt_tokens` / `prompt_chars`；completion tokens 与成本未统计 |
 | §3 私密记录 `is_private` | 未做 | 当前裁剪只按 `couple_visible` + scope |
-| Facts 设置页 | 暂缓 | 用户决定"不想搞得太 IT" |
 | sources 落库 | 未做 | 表字段已留，未解析引用 |
 | 会话标题模型生成 | 未做（方案已定） | `title.enabled`，失败回退前 30 字 |
 | 链接 chip 识别 | 未做 | 方案已定：单框 + 派生 chip，软上限 3 |
@@ -469,15 +471,15 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 
 注：`record_tags`（AI 洞察）**不再单独注入**。每天取 1–2 个并入摘要；跨记录的模式应沉淀为 facts。
 
-Agent 目前**没有任何写入口**：facts / record_tags 只有手动 CRUD，聊天只写消息。
+Agent 不能直接写库：只能通过 `propose_fact` / `propose_tag` / `propose_report` 创建 pending 提议，用户确认后才落库。
 
 **压缩方案（轻量可靠）**
 
-- 按 **token** 而非轮数触发：会话历史超过预算（如 1500 tokens）时压缩
-- 保留最近 N 轮原文 + 更早轮次的滚动摘要；存 `summary` 与 `summary_until_message_id`
+- 按 **token** 而非轮数触发：未压缩历史估算超过 4000 tokens，或消息条数超过 40 条兜底
+- 保留最近 6 条原文 + 更早消息的滚动摘要；存 `summary` 与 `summary_until_id`
 - 摘要用低温度、小 `max_tokens` 单独调用；失败降级为截断并标记 `degraded`
-- `couple_memory.summary` 改为真正的摘要调用（输入：旧 summary + 本期新记录），不再截取前 200 字
-- facts 注入按 pinned + confidence + 最近使用排序，上限 30 条；全量只在报告中使用
+- `couple_memory.summary` 已改为真正的摘要调用（输入：旧 summary + 本期新记录），不再截取报告开头
+- facts 注入按 `pinned DESC, id ASC` 排序，上限 30 条；全量只在报告中使用
 
 参考：LangChain ConversationSummaryBufferMemory、MemGPT/Letta 的分层记忆、Claude Code 的 compaction。
 
@@ -523,7 +525,7 @@ propose_tag({ recordId, tagType, content })
 propose_report({ start, end })
 ```
 
-- 三类写入：fact、tag、report（report 确认后调生成接口，`period_type='custom'`）
+- 三类写入：fact、tag、report（report 确认后调生成接口，周期沿用 `week` / `month`，自定义区间也沿用所选类型）
 - 工具返回 `{proposalId}`，最终回复里只自然语言说明"我整理了几条建议，你看看要不要保存"
 - 幂等键：`source_message_id + content hash`
 - 溯源：沿用 `source_ref_message_id` / `source_ref_id`
@@ -536,7 +538,7 @@ propose_report({ start, end })
 
 - 触发：未压缩历史的估算 tokens > 4000（用上次回答实测 `prompt_tokens / prompt_chars` 校准比例，默认 字符数/1.5，clamp 到 [0.3,1.2]）；超短消息堆积 > 40 条兜底
 - 方式：保留最近 6 条原文，更早的做增量摘要：`旧摘要 + 被挤出轮次 → 新摘要`
-- 落库：`chat_sessions.summary` + `summary_until_message_id` + `summary_prompt_version`
+- 落库：`chat_sessions.summary` + `summary_until_id`
 - 失败降级：摘要调用失败则退回纯截断，标记 `degraded`，不影响本轮回复
 - 摘要输入不逐条截断，按整段 24000 字符预算取最早的完整消息；超预算的留到下一轮再压
 - 执行时机：本轮写入用户消息**之前**同步执行（否则本轮会被误压进摘要）；并发用 `UPDATE ... WHERE summary_until_id = 旧值` 条件更新防回退
@@ -552,7 +554,7 @@ propose_report({ start, end })
 | 最近一份报告摘要 | 400 tokens |
 | 压缩摘要 | 400 tokens |
 | 真实历史 | 4000 tokens（全文回放；60 条上限仅作压缩降级熔断） |
-| 单次工具结果 | 2k tokens |
+| 单次工具结果 | 6000 字符（约 4k tokens） |
 
 超出总预算时按此顺序砍：旧历史 → 工具结果 → facts → 报告摘要。system 永不截断。
 
@@ -565,7 +567,7 @@ propose_report({ start, end })
   - 持久化边界：只存 `user` 与最终 `assistant` 两条；tool 消息用完即弃
   - 理由：旧结果会过时、JSON 冗长、官方不支持在历史中间插入工具调用、历史保持稳定才能命中前缀缓存
   - 代价：模型不记得上次查过什么，可能重复调用；查询是本地 SQLite，可接受
-  - 折中：assistant 消息附一行动作日志 `{tools:[{name,args}]}`，下轮渲染成"上一轮已查阅 11-14~11-20"，只占几十字，避免重复查询
+  - 折中（暂不做，用户决定先靠压缩控制上下文）：assistant 消息附一行动作日志 `{tools:[{name,args}]}`，下轮渲染成"上一轮已查阅 11-14~11-20"，只占几十字，避免重复查询
     - 由规则生成（工具名 + 参数的模板），不调模型；文案由工具注册时的 `describe(args)` 提供
     - **只渲染最近 1 轮**，更早的不渲染；固定窗口、天然有界，**不需要压缩**
     - 以 system 消息形式插在本次 user 消息之前（官方支持中间插入 system）
@@ -577,7 +579,7 @@ propose_report({ start, end })
 - 参数由后端校验；`strict` 模式需走 `/beta` 且所有 object 的 `additionalProperties:false`、属性全 required，暂不启用
 - 限制：Chat Completion 不支持在历史中间插入工具调用（官方说明）；需要时改用 Responses API
 - 注意：开启思考模式且带 `tools` 时，后续请求必须回传 `reasoning_content`，否则 400；聊天计划关闭思考，暂不受影响
-- 服务端工具 `deepseek_read_url` 与客户端 function tools 能否同时声明需实测；冲突时聊天优先保留 `read_url`
+- 服务端工具 `deepseek_read_url` 与客户端 function tools 已实测可同时声明
 
 流式输出：
 
@@ -587,11 +589,12 @@ propose_report({ start, end })
 
 提议与确认：
 
-- proposal 落库（`chat_proposals`：id、user_id、session_id、message_id、kind、payload、status、couple_visible、result_ref_id、created_at、decided_at）
-- 状态：`pending` → `accepted` / `rejected`；确认接口用条件更新兜并发，重复确认返回 409
-- 同一会话内同 kind、同内容的 pending 提议不重复创建；fact 还会查 facts 表已有内容
+- proposal 落库（`chat_proposals`：id、user_id、session_id、message_id、kind、payload、final_payload、edited、status、couple_visible、result_ref_id、created_at、decided_at）
+- 状态：`pending` → `accepted` / `rejected` / `expired`；确认接口用条件更新兜并发，重复确认返回 409
+- 同一会话内同 kind、同内容的 pending 提议不重复创建；fact 还会查 facts 表已有内容，tag 查 `record_tags` 已有内容
 - 刷新/换设备后仍能看到待确认项（提议随消息列表返回，挂在对应 assistant 消息下）
-- 未做：提议编辑、7 天过期、用户直接输入新问题时自动把 pending 置为 superseded
+- 已做：卡片内编辑后采纳（保存差异，标记 `edited`，记录 `final_payload`）；用户发新消息时把剩余 pending 置为 `expired`；下一轮用一条临时 system 汇总"自上次回复以来"的采纳/拒绝/作废/修改，不落库
+- 未做：7 天过期清理（当前只在用户继续对话时作废）
 
 生成与断线：
 

@@ -251,6 +251,11 @@ curl -I https://emotion.cinnamon.xin
 4. 账号 B 登录后兑换凭证，能看到 A 的月视图和扭蛋机，但**不能编辑**。
 5. 账号 A 撤销凭证后，账号 B 刷新应看到无权限提示。
 6. 用两个浏览器或无痕窗口同时登录两个账号，确认数据互不串。
+7. AI 相关（`DEEPSEEK_API_KEY` 已配置时）：
+   - 「聊一聊」发一句“请记住：我不喜欢香菜”，应出现待确认的长期记忆卡片；不点采纳时库里不应有这条 fact。
+   - 编辑卡片内容后采纳，去「设置 → 长期记忆」确认是修改后的内容。
+   - 留一条未处理的提议，再发一条新消息，卡片应变为“已作废”。
+   - 观察日志 `journalctl -u emotion-calendar -n 50`，确认没有 `result_too_large`、`proposal` 相关异常。
 
 ## 10. 日常更新
 
@@ -264,6 +269,12 @@ npm --prefix server prune --omit=dev
 systemctl restart emotion-calendar
 curl -s http://127.0.0.1:3100/api/health
 ```
+
+补充：
+
+- 服务端提示词、工具 schema 都在仓库里（`server/src/lib/prompts/`、`server/src/lib/tools.js`），`git pull` 即更新，不需要单独上传。
+- 依赖没变时可以跳过两个 `npm ci`，但前端改动必须重新 `npm --prefix client run build`；只改服务端则只需 `git pull && systemctl restart`。
+- 重启后看一次日志，确认没有迁移失败：`journalctl -u emotion-calendar -n 30 --no-pager`。
 
 ### 数据库迁移
 
@@ -429,4 +440,10 @@ npm --prefix server ci && npm --prefix client ci && npm --prefix client run buil
 systemctl restart emotion-calendar
 ```
 
-数据库结构没有迁移脚本，回滚代码不会影响已有数据。
+数据库迁移在服务启动时自动执行，回滚代码不会回退已迁移的库。如果新版本做过结构迁移、旧代码不兼容新结构，按 §10 用迁移前快照恢复数据库：
+
+```bash
+systemctl stop emotion-calendar
+cp backups/pre-migrate-vN-<时间>.db data/emotion.db
+systemctl start emotion-calendar
+```

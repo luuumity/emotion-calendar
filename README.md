@@ -10,7 +10,8 @@
 - **日视图（扭蛋机）**：Matter.js 真实物理，拖动色块投进玻璃罩，扭蛋下落并与已有扭蛋碰撞；点击任意扭蛋可查看/编辑当天的理由。
 - **隐私与授权**：默认完全隔离。生成凭证时可选择「仅颜色」或「颜色 + 理由」；对方兑换后只读访问，随时可撤销。
 - **AI 分析**：单人报告手动生成、双人报告需双方互惠 full 档授权；报告按周期落库、不回溯重算，含增量水位。
-- **聊一聊**：persona agent 基于自己的记录、标签、facts 与历史报告对话，会话可新建/删除；消息里的链接可由模型自行读取。
+- **聊一聊**：persona agent 可以按需查询自己的记录、标签和过往报告，基于 facts 与历史报告对话；会话可新建/删除；消息里的链接可由模型自行读取。
+- **长期记忆**：对话中 agent 只能创建待确认的提议（事实 / 标签 / 报告），确认后才落库；可在「设置 → 长期记忆」增删改、置顶、控制是否对另一半可见。
 - **分值微调**：选中扭蛋后可滑杆/步进微调分数，保留「已调过」标记。
 - **账号体系**：用户名 + 密码，HttpOnly Cookie 会话，数据按用户隔离。
 - **每日提醒**：可选的 Web Push 通知，当天没记录时在设定时间提醒；支持「添加到主屏幕」后的独立窗口与 iOS 推送。
@@ -120,11 +121,16 @@ PORT=3001 DB_PATH=/srv/emotion-calendar/data/emotion.db pm2 start server/src/ind
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `HOST` | `0.0.0.0` | 监听地址；生产环境建议设为 `127.0.0.1` 只允许本机 Nginx 访问 |
-| `PORT` | `3001` | 服务端口 |
+| `PORT` | `3001` | 服务端口（当前生产实例用 `3100`，以 `.env.production` 为准） |
 | `DB_PATH` | `server/data/emotion.db` | SQLite 文件路径 |
 | `JWT_SECRET` | 自动生成 | 会话签名密钥；不设置则生成并保存在 data 目录 |
 | `JWT_SECRET_FILE` | `server/data/jwt-secret.txt` | 自动生成密钥的保存位置 |
 | `COOKIE_SECURE` | `0` | 设为 `1` 时登录 Cookie 仅通过 HTTPS 发送 |
+| `DEEPSEEK_API_KEY` | 空 | 不设置时聊一聊和报告返回占位内容，不报错 |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | 模型名；`deepseek-chat` 已于 2026-07-24 弃用 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | 接口地址 |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | 空 | Web Push 密钥；不设置时每日提醒不可用 |
+| `VAPID_SUBJECT` | `mailto:admin@emotion.cinnamon.xin` | Web Push 联系地址 |
 
 ### 数据备份
 
