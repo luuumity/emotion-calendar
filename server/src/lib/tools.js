@@ -94,7 +94,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'propose_fact',
       description:
-        '提议把一条关于用户的长期事实写入记忆。只是待确认建议，不会立即生效；用户确认后才会保存。',
+        '提议把一条关于用户的长期事实写入记忆。只是待确认建议，不会立即生效；用户确认后才会保存。只能新增，不能修改或删除已有事实。',
       parameters: {
         type: 'object',
         properties: {
@@ -110,7 +110,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'propose_tag',
       description:
-        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。recordId 必须来自 get_days 或 get_record。',
+        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。recordId 必须来自 get_days 或 get_record。只能新增，不能修改或删除已有标签。',
       parameters: {
         type: 'object',
         properties: {
@@ -131,7 +131,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'propose_report',
       description:
-        '提议生成一份单人 AI 分析报告。只是待确认建议，用户确认后由前端触发生成。periodType 为 week 或 month；也可以同时给 start/end 指定自定义区间。',
+        '提议生成一份单人 AI 分析报告。只是待确认建议，用户确认后由前端触发生成。periodType 为 week 或 month；也可以同时给 start/end 指定自定义区间。只生成新报告，不修改已有报告。',
       parameters: {
         type: 'object',
         properties: {
@@ -370,6 +370,13 @@ function proposeTag(ctx, args) {
   }
   const content = normText(args?.content, 500)
   if (!content) return { ok: false, reason: 'bad_args', hint: '标签内容需为 1-500 字的文本' }
+
+  const dup = db
+    .prepare('SELECT id FROM record_tags WHERE record_id = ? AND user_id = ? AND tag_type = ? AND content = ?')
+    .get(recordId, ctx.userId, tagType, content)
+  if (dup) {
+    return { ok: false, reason: 'already_exists', tagId: dup.id, hint: '这条记录已经有同样的标签了，不需要再提。' }
+  }
 
   return insertProposal(ctx, 'tag', { recordId, recordDay: record.day, tagType, content })
 }
