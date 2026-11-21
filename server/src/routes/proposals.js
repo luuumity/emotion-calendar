@@ -10,6 +10,7 @@ const router = Router()
 router.use(requireUser)
 
 const TAG_TYPES = ['insight', 'suggestion', 'pattern', 'correction']
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function toInt(input) {
   const n = Number(input)
@@ -22,6 +23,16 @@ function toFlag(input) {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function isValidDay(s) {
+  if (!DAY_RE.test(s)) return false
+  const d = new Date(`${s}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
+}
+
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
 }
 
 function parsePayload(row) {
@@ -168,6 +179,60 @@ function acceptTag(row, coupleVisible, override) {
   })()
 }
 
+function recordView(row) {
+  return {
+    id: row.id,
+    day: row.day,
+    score: row.score,
+    note: row.note,
+    originalScore: row.original_score,
+    adjustedAt: row.adjusted_at
+  }
+}
+
+function acceptRecord(row, override) {
+  const payload = parsePayload(row) || {}
+  const day = String(override?.day !== undefined ? override.day : payload.day || '')
+  if (!isValidDay(day)) return { error: '日期格式应为 YYYY-MM-DD', status: 400 }
+  if (day > shanghaiToday()) return { error: '日期不能晚于今天', status: 400 }
+
+  const score = Number(override?.score !== undefined ? override.score : payload.score)
+  if (!Number.isInteger(score) || score < 0 || score > 100) {
+    return { error: '分值需为 0-100 的整数', status: 400 }
+  }
+
+  const rawNote = override?.note !== undefined ? override.note : payload.note
+  const note = typeof rawNote === 'string' ? rawNote.trim() : ''
+  if (note.length > 2000) return { error: '理由不能超过 2000 字', status: 400 }
+
+  const baseDay = String(payload.day || '')
+  const baseScore = Number(payload.score)
+  const baseNote = typeof payload.note === 'string' ? payload.note.trim() : ''
+  const edited = day !== baseDay || score !== baseScore || note !== baseNote ? 1 : 0
+  const finalPayload = JSON.stringify({ ...payload, day, score, note })
+  const now = nowIso()
+
+  return db.transaction(() => {
+    const current = db.prepare('SELECT status FROM chat_proposals WHERE id = ?').get(row.id)
+    if (!current || current.status !== 'pending') {
+      return { error: '这条提议已经处理过了', status: 409 }
+    }
+
+    const info = db
+      .prepare(
+        `INSERT INTO records (user_id, day, score, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(row.user_id, day, score, note, now, now)
+    db.prepare(
+      `UPDATE chat_proposals
+       SET status = 'accepted', result_ref_id = ?, final_payload = ?, edited = ?, decided_at = ?
+       WHERE id = ? AND status = 'pending'`
+    ).run(info.lastInsertRowid, finalPayload, edited, now, row.id)
+    return { record: recordView(db.prepare('SELECT * FROM records WHERE id = ?').get(info.lastInsertRowid)) }
+  })()
+}
+
 function acceptReport(row) {
   const payload = parsePayload(row)
   const periodType = payload?.periodType === 'week' ? 'week' : payload?.periodType === 'month' ? 'month' : null
@@ -205,6 +270,7 @@ router.post('/:id/accept', (req, res) => {
   let result
   if (row.kind === 'fact') result = acceptFact(row, coupleVisible, override)
   else if (row.kind === 'tag') result = acceptTag(row, coupleVisible, override)
+  else if (row.kind === 'record') result = acceptRecord(row, override)
   else if (row.kind === 'report') result = acceptReport(row)
   else result = { error: '暂不支持这类提议', status: 400 }
 

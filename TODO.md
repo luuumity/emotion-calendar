@@ -471,7 +471,7 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 
 注：`record_tags`（AI 洞察）**不再单独注入**。每天取 1–2 个并入摘要；跨记录的模式应沉淀为 facts。
 
-Agent 不能直接写库：只能通过 `propose_fact` / `propose_tag` / `propose_report` 创建 pending 提议，用户确认后才落库。
+Agent 不能直接写库：只能通过 `propose_fact` / `propose_tag` / `propose_report` / `propose_record` 创建 pending 提议，用户确认后才落库。
 
 **压缩方案（轻量可靠）**
 
@@ -523,13 +523,14 @@ Agent 不能直接写库：只能通过 `propose_fact` / `propose_tag` / `propos
 propose_fact({ content, confidence? })
 propose_tag({ recordId, tagType, content })
 propose_report({ start, end })
+propose_record({ day, score, note? })
 ```
 
-- 三类写入：fact、tag、report（report 确认后调生成接口，周期沿用 `week` / `month`，自定义区间也沿用所选类型）
+- 四类写入：fact、tag、report、record（record 确认后直接插入一条新记录，不检查当天已有球；report 确认后调生成接口，周期沿用 `week` / `month`，自定义区间也沿用所选类型）
 - 工具返回 `{proposalId}`，最终回复里只自然语言说明"我整理了几条建议，你看看要不要保存"
 - 幂等键：`source_message_id + content hash`
 - 溯源：沿用 `source_ref_message_id` / `source_ref_id`
-- 记录本身永不由 agent 写，只允许附着标签
+- 记录只能通过 `propose_record` 新增，Agent 不能修改或删除已有记录；标签可附着在记录上
 - 备选方案：回复末尾输出 `<proposal>` 标签再解析。少一次工具往返，但格式不稳定，暂不采用
 
 **压缩（2026-11-20 定）**
@@ -621,7 +622,7 @@ propose_report({ start, end })
 - [x] P3a：写协议（propose_fact / propose_tag / propose_report + `/api/proposals` 确认接口 + 聊天确认卡片）；报告提议只支持单人，采纳后由前端触发生成；双人报告等 `get_partners` 再做
 - [x] P3b：提议闭环——v9 重建 `chat_proposals`（`record` / `expired` / `final_payload` / `edited`）；fact/tag 卡片内容可直接编辑后采纳；发新消息时剩余 pending 一律作废；历史之后、本轮 user 之前插入一条临时 system，汇总自上次回复以来的采纳/作废/修改（不落库）；标签采纳时按记录+类型+内容查重
 - [x] P3c：长期记忆管理页——设置页新增「长期记忆」tab，支持查看、添加、行内编辑、置顶、控制对另一半可见、删除；聊天会话列表底部提供跳转入口。已浏览器验证新增/编辑/删除、置顶与可见性、侧栏跳转；提议卡片编辑采纳、作废灰显、真实模型下的临时 system 注入均已验证
-- [ ] 下一阶段：`propose_record`（新增某日的球）——v9 已允许 `record` 类型，无需再迁表；卡片可编辑日期/分值/理由，确认后插入新记录，不自动合并当天已有球
+- [x] P3d：`propose_record`——新增某日的球；v9 已允许 `record` 类型，无需迁移；卡片可编辑日期/分值/理由，确认后直接插入新记录（不检查当天是否已有球，也不做内容级去重）；日期/分值必填，日期不得晚于今天，理由可选 ≤2000 字；卡片实时校验、无效时采纳按钮禁用
 - [ ] P4：流式输出 + run 生命周期（断线补全）
 - [x] 前置实测：服务端工具与客户端 function tools 共存（可用）；`deepseek_read_url` 对 B 站可用、对小红书被拦
 - [ ] 前置实测：流式下的 `tool_calls` 分片拼接（等 P4）

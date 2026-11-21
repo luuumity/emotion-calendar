@@ -93,8 +93,20 @@ router.put('/:id', (req, res) => {
   const row = SELECT_ONE.get(id, req.user.id)
   if (!row) return res.status(404).json({ error: '没有找到这条事实' })
 
-  const content = toContent(req.body?.content) ?? row.content
-  const confidence = toConfidence(req.body?.confidence) ?? row.confidence
+  let content = row.content
+  if (req.body?.content !== undefined) {
+    const next = toContent(req.body.content)
+    if (!next) return res.status(400).json({ error: '内容需为 1-500 字的文本，并去掉首尾空白' })
+    content = next
+  }
+
+  let confidence = row.confidence
+  if (req.body?.confidence !== undefined) {
+    const next = toConfidence(req.body.confidence)
+    if (!next) return res.status(400).json({ error: '置信度需为 1-5 的整数' })
+    confidence = next
+  }
+
   const source = req.body?.source !== undefined ? toSource(req.body.source) : row.source
   const sourceRefId = req.body?.sourceRefId !== undefined ? toInt(req.body.sourceRefId) : row.source_ref_id
   const coupleVisible = req.body?.coupleVisible !== undefined ? toFlag(req.body.coupleVisible) : row.couple_visible

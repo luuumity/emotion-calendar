@@ -3102,6 +3102,46 @@ p {
   border-color: var(--coral);
 }
 
+.chat-proposal-record {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.chat-proposal-record label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.chat-proposal-record label:last-child {
+  grid-column: 1 / -1;
+}
+
+.chat-proposal-record input,
+.chat-proposal-record textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.chat-proposal-record textarea {
+  resize: vertical;
+}
+
+.chat-proposal-record input:focus,
+.chat-proposal-record textarea:focus {
+  outline: none;
+  border-color: var(--coral);
+}
+
 .chat-proposal-head {
   display: flex;
   align-items: center;

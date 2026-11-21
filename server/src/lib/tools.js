@@ -9,7 +9,13 @@ const MAX_ITEMS = 60
 const NOTE_PREVIEW = 200
 
 function isDay(s) {
-  return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
+  const d = new Date(`${s}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
+}
+
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
 }
 
 function dayDiff(a, b) {
@@ -140,6 +146,23 @@ export const FUNCTION_TOOLS = [
           end: { type: 'string', description: '自定义结束日期 YYYY-MM-DD，可选' }
         },
         required: ['periodType']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_record',
+      description:
+        '提议新增一颗情绪球（某一天的记录）。只是待确认建议，用户确认后才写入。日期和分值必须由用户明确给出，缺少分值先问用户，不要猜。日期不能是未来。只能新增，不能修改或删除已有记录。',
+      parameters: {
+        type: 'object',
+        properties: {
+          day: { type: 'string', description: '日期 YYYY-MM-DD，不能晚于今天' },
+          score: { type: 'integer', description: '感受值 0-100 的整数，必须来自用户' },
+          note: { type: 'string', description: '理由，可选，最多 2000 字' }
+        },
+        required: ['day', 'score']
       }
     }
   }
@@ -301,6 +324,7 @@ function normText(input, max) {
 function payloadKey(kind, payload) {
   if (kind === 'fact') return JSON.stringify([kind, payload.content, payload.confidence])
   if (kind === 'tag') return JSON.stringify([kind, payload.recordId, payload.tagType, payload.content])
+  if (kind === 'record') return JSON.stringify([kind, payload.day, payload.score, payload.note])
   return JSON.stringify([kind, payload.periodType, payload.start, payload.end])
 }
 
@@ -404,6 +428,25 @@ function proposeReport(ctx, args) {
   return result
 }
 
+function proposeRecord(ctx, args) {
+  const day = String(args?.day || '')
+  if (!isDay(day)) return { ok: false, reason: 'bad_args', hint: 'day 需要是 YYYY-MM-DD' }
+  if (day > shanghaiToday()) {
+    return { ok: false, reason: 'bad_args', hint: '不能创建未来日期的记录' }
+  }
+
+  const score = Number(args?.score)
+  if (!Number.isInteger(score) || score < 0 || score > 100) {
+    return { ok: false, reason: 'bad_args', hint: 'score 需要是 0-100 的整数，并且必须来自用户' }
+  }
+
+  const rawNote = args?.note === undefined || args.note === null ? '' : String(args.note)
+  const note = rawNote.trim()
+  if (note.length > 2000) return { ok: false, reason: 'bad_args', hint: '理由不能超过 2000 字' }
+
+  return insertProposal(ctx, 'record', { day, score, note })
+}
+
 /**
  * 执行一个工具调用，返回可以直接塞进 role:"tool" 的字符串。
  * 结果过大时不返回半截数据，而是返回一个提示对象。
@@ -418,12 +461,18 @@ export function executeTool(name, args, ctx) {
     else if (name === 'get_tags') data = getTags(userId, args)
     else if (name === 'get_record') data = getRecord(userId, args)
     else if (name === 'get_report') data = getReport(userId, args)
-    else if (name === 'propose_fact' || name === 'propose_tag' || name === 'propose_report') {
+    else if (
+      name === 'propose_fact' ||
+      name === 'propose_tag' ||
+      name === 'propose_report' ||
+      name === 'propose_record'
+    ) {
       if (!isContext || !ctx.sessionId || !ctx.run) {
         data = { ok: false, reason: 'no_session', hint: '写入建议只能出现在对话里' }
       } else if (name === 'propose_fact') data = proposeFact(ctx, args)
       else if (name === 'propose_tag') data = proposeTag(ctx, args)
-      else data = proposeReport(ctx, args)
+      else if (name === 'propose_report') data = proposeReport(ctx, args)
+      else data = proposeRecord(ctx, args)
     } else data = { ok: false, reason: 'unknown_tool', hint: '没有这个工具' }
   } catch (err) {
     data = { ok: false, reason: 'tool_error', hint: err.message }

@@ -19,6 +19,12 @@ router.use(requireUser)
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 const COUPLE_MEMORY_LIMIT = 300
 
+function isValidDay(s) {
+  if (!DAY_RE.test(s)) return false
+  const d = new Date(`${s}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s
+}
+
 /**
  * 把旧记忆 + 本期增量记录压成新记忆。
  * 失败时返回 null，由调用方退回旧行为（截取报告开头），不影响报告本身。
@@ -175,10 +181,22 @@ function generateSingleInsightSync({ userId, periodType = 'week', customStart, c
 router.post('/single/generate', async (req, res) => {
   const periodType = req.body?.periodType === 'month' ? 'month' : 'week'
   // 支持指定周期（手动 = 自定义）
-  const customStart = DAY_RE.test(String(req.body?.start || '')) ? String(req.body.start) : null
-  const customEnd = DAY_RE.test(String(req.body?.end || '')) ? String(req.body.end) : null
-  if (customStart && !customEnd) return res.status(400).json({ error: '需要同时提供 start 和 end' })
-  if (!customStart && customEnd) return res.status(400).json({ error: '需要同时提供 start 和 end' })
+  const rawStart = String(req.body?.start ?? '').trim()
+  const rawEnd = String(req.body?.end ?? '').trim()
+  const hasStart = rawStart !== ''
+  const hasEnd = rawEnd !== ''
+  if (hasStart !== hasEnd) return res.status(400).json({ error: '需要同时提供 start 和 end' })
+  if (hasStart && !isValidDay(rawStart)) {
+    return res.status(400).json({ error: '起始日期格式应为 YYYY-MM-DD' })
+  }
+  if (hasEnd && !isValidDay(rawEnd)) {
+    return res.status(400).json({ error: '结束日期格式应为 YYYY-MM-DD' })
+  }
+  if (hasStart && rawStart > rawEnd) {
+    return res.status(400).json({ error: '起始日期不能晚于结束日期' })
+  }
+  const customStart = hasStart ? rawStart : null
+  const customEnd = hasEnd ? rawEnd : null
 
   try {
     const result = await generateSingleInsightSync({ userId: req.user.id, periodType, customStart, customEnd })

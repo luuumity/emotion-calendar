@@ -385,27 +385,63 @@ function proposalText(item: ChatProposal) {
   return p?.content || ''
 }
 
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
 function ProposalCard({ proposal }: { proposal: ChatProposal }) {
+  const initial = proposal.finalPayload || proposal.payload
   const [item, setItem] = useState(proposal)
   const [visible, setVisible] = useState(proposal.coupleVisible)
-  const [draft, setDraft] = useState((proposal.finalPayload || proposal.payload)?.content || '')
+  const [draft, setDraft] = useState(initial?.content || '')
+  const [day, setDay] = useState(initial?.day || '')
+  const [score, setScore] = useState(initial?.score != null ? String(initial.score) : '')
+  const [reason, setReason] = useState(initial?.note || '')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const navigate = useNavigate()
   const pending = item.status === 'pending'
   const p = item.finalPayload || item.payload
-  const editable = pending && (item.kind === 'fact' || item.kind === 'tag')
+  const editable = pending && (item.kind === 'fact' || item.kind === 'tag' || item.kind === 'record')
+  const today = shanghaiToday()
+
+  function validationError(): string | null {
+    if (!pending) return null
+    if (item.kind === 'fact' || item.kind === 'tag') {
+      if (!draft.trim()) return '内容不能为空'
+      if (draft.trim().length > 500) return '内容不能超过 500 字'
+      return null
+    }
+    if (item.kind === 'record') {
+      if (!DAY_RE.test(day)) return '请填写有效日期（YYYY-MM-DD）'
+      if (day > today) return '日期不能晚于今天'
+      if (score.trim() === '') return '请填写分值'
+      const n = Number(score)
+      if (!Number.isInteger(n) || n < 0 || n > 100) return '分值需为 0–100 的整数'
+      if (reason.length > 2000) return '理由不能超过 2000 字'
+    }
+    return null
+  }
+
+  const invalid = validationError()
 
   async function accept() {
     if (busy) return
-    if (editable && !draft.trim()) {
-      setNote('内容不能为空')
+    if (invalid) {
+      setNote(invalid)
       return
     }
     setBusy(true)
     setNote(null)
     try {
-      const res = await api.acceptProposal(item.id, visible, editable ? { content: draft.trim() } : undefined)
+      let override: ChatProposal['payload'] | undefined
+      if (item.kind === 'fact' || item.kind === 'tag') override = { content: draft.trim() }
+      else if (item.kind === 'record') {
+        override = { day, score: Number(score), note: reason.trim() }
+      }
+      const res = await api.acceptProposal(item.id, visible, override)
       setItem(res.proposal)
       if (res.action) {
         setNote('正在生成报告…')
@@ -452,7 +488,35 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
           </span>
         )}
       </div>
-      {editable ? (
+      {editable && item.kind === 'record' ? (
+        <div className="chat-proposal-record">
+          <label>
+            <span>日期</span>
+            <input type="date" value={day} max={today} onChange={(e) => setDay(e.target.value)} />
+          </label>
+          <label>
+            <span>分值</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={score}
+              onChange={(e) => setScore(e.target.value)}
+            />
+          </label>
+          <label>
+            <span>理由</span>
+            <textarea
+              rows={2}
+              maxLength={2000}
+              placeholder="可选"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </label>
+        </div>
+      ) : editable ? (
         <textarea
           className="chat-proposal-edit"
           value={draft}
@@ -471,7 +535,7 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
       )}
       {pending ? (
         <div className="chat-proposal-actions">
-          <button type="button" className="primary-btn" onClick={accept} disabled={busy}>
+          <button type="button" className="primary-btn" onClick={accept} disabled={busy || Boolean(invalid)}>
             {busy ? '处理中…' : '采纳'}
           </button>
           <button type="button" className="ghost-btn small" onClick={reject} disabled={busy}>
@@ -483,12 +547,15 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
           {item.status === 'accepted'
             ? item.kind === 'report'
               ? '已采纳'
-              : `已保存（${item.coupleVisible ? '对另一半可见' : '仅自己可见'}${item.edited ? ' · 已修改' : ''}）`
+              : item.kind === 'record'
+                ? `已保存（${p?.day || ''}${p?.score != null ? ` · ${p.score} 分` : ''}${item.edited ? ' · 已修改' : ''}）`
+                : `已保存（${item.coupleVisible ? '对另一半可见' : '仅自己可见'}${item.edited ? ' · 已修改' : ''}）`
             : item.status === 'expired'
               ? '已作废（你继续了新对话）'
               : '已忽略'}
         </span>
       )}
+      {pending && invalid && <span className="chat-proposal-note">{invalid}</span>}
       {note && <span className="chat-proposal-note">{note}</span>}
     </div>
   )

@@ -12,7 +12,10 @@ const SELECT_FIELDS = 'id, day, score, note, created_at, updated_at, original_sc
 const selectOne = db.prepare(`SELECT ${SELECT_FIELDS} FROM records WHERE id = ? AND user_id = ?`)
 
 function toDate(day) {
-  return DAY_RE.test(String(day || '')) ? String(day) : null
+  const s = String(day || '')
+  if (!DAY_RE.test(s)) return null
+  const d = new Date(`${s}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : null
 }
 
 function toScore(input) {
