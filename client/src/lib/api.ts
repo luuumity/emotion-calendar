@@ -133,6 +133,7 @@ export type ChatProposal = {
     recordDay?: string
     recordIndex?: number
     recordScore?: number
+    recordMissing?: boolean
     tagType?: RecordTag['tagType']
     periodType?: 'week' | 'month'
     start?: string | null

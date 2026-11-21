@@ -10,6 +10,7 @@ import { ensureCompressed } from '../lib/compress.js'
 import { getDefaultSystemPrompt } from '../lib/persona.js'
 import { buildChatMessages } from '../lib/prompts/chat.js'
 import { FUNCTION_TOOLS, executeTool } from '../lib/tools.js'
+import { withLiveTagTarget } from '../lib/proposalView.js'
 
 const router = Router()
 router.use(requireUser)
@@ -57,7 +58,7 @@ function proposalView(row) {
     id: row.id,
     kind: row.kind,
     status: row.status,
-    payload,
+    payload: withLiveTagTarget(row, payload),
     coupleVisible: Boolean(row.couple_visible),
     resultRefId: row.result_ref_id,
     createdAt: row.created_at,

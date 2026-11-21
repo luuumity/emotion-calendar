@@ -410,6 +410,7 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
   function validationError(): string | null {
     if (!pending) return null
     if (item.kind === 'fact' || item.kind === 'tag') {
+      if (item.kind === 'tag' && p?.recordMissing) return '这颗球已被删除，无法采纳'
       if (!draft.trim()) return '内容不能为空'
       if (draft.trim().length > 500) return '内容不能超过 500 字'
       return null
@@ -487,7 +488,8 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
               p.recordDay || '',
               p.recordIndex ? `第 ${p.recordIndex} 颗` : '',
               p.recordScore != null ? `${p.recordScore} 分` : '',
-              TAG_TYPE_LABEL[p.tagType] || p.tagType
+              TAG_TYPE_LABEL[p.tagType] || p.tagType,
+              p.recordMissing ? '已被删除' : ''
             ]
               .filter(Boolean)
               .join(' · ')}

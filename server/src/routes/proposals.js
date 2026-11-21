@@ -5,6 +5,7 @@
 import { Router } from 'express'
 import { db } from '../db.js'
 import { requireUser } from '../auth.js'
+import { withLiveTagTarget } from '../lib/proposalView.js'
 
 const router = Router()
 router.use(requireUser)
@@ -48,7 +49,7 @@ function view(row) {
     id: row.id,
     kind: row.kind,
     status: row.status,
-    payload: parsePayload(row),
+    payload: withLiveTagTarget(row, parsePayload(row)),
     finalPayload: row.final_payload ? parsePayload({ payload: row.final_payload }) : null,
     edited: Boolean(row.edited),
     coupleVisible: Boolean(row.couple_visible),
@@ -144,12 +145,16 @@ function acceptTag(row, coupleVisible, override) {
     return { error: '标签内容需为 1-500 字', status: 400 }
   }
 
-  const record = db.prepare('SELECT id FROM records WHERE id = ? AND user_id = ?').get(recordId, row.user_id)
+  const record = db.prepare('SELECT id, day, score FROM records WHERE id = ? AND user_id = ?').get(recordId, row.user_id)
   if (!record) {
     // 记录已经不在了，这条提议没有意义，直接清掉
     db.prepare('DELETE FROM chat_proposals WHERE id = ?').run(row.id)
     return { error: '这条记录已经不在了，建议已失效', status: 404 }
   }
+
+  const recordIndex = db
+    .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
+    .get(row.user_id, record.day, record.id).c
 
   const dup = db
     .prepare('SELECT id FROM record_tags WHERE record_id = ? AND tag_type = ? AND content = ?')
@@ -157,7 +162,13 @@ function acceptTag(row, coupleVisible, override) {
   if (dup) return { error: '这条记录已经有相同内容的标签了', status: 409 }
 
   const edited = content !== baseContent ? 1 : 0
-  const finalPayload = JSON.stringify({ ...payload, content })
+  const finalPayload = JSON.stringify({
+    ...payload,
+    recordDay: record.day,
+    recordIndex,
+    recordScore: record.score,
+    content
+  })
   const now = nowIso()
 
   return db.transaction(() => {
