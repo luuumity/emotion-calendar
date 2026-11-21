@@ -229,7 +229,7 @@ p {
 .chat-fab {
   position: fixed;
   right: 24px;
-  bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   z-index: 40;
   display: grid;
   place-items: center;
@@ -278,7 +278,7 @@ p {
 @media (max-width: 520px) {
   .chat-fab {
     right: 16px;
-    bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(64px + env(safe-area-inset-bottom, 0px));
     width: 52px;
     height: 52px;
   }
