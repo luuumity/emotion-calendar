@@ -483,8 +483,14 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
         <span className="chat-proposal-kind">{KIND_LABEL[item.kind]}</span>
         {item.kind === 'tag' && p?.tagType && (
           <span className="chat-proposal-day">
-            {p.recordDay ? `${p.recordDay} · ` : ''}
-            {TAG_TYPE_LABEL[p.tagType] || p.tagType}
+            {[
+              p.recordDay || '',
+              p.recordIndex ? `第 ${p.recordIndex} 颗` : '',
+              p.recordScore != null ? `${p.recordScore} 分` : '',
+              TAG_TYPE_LABEL[p.tagType] || p.tagType
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </span>
         )}
       </div>

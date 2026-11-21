@@ -131,6 +131,8 @@ export type ChatProposal = {
     confidence?: number
     recordId?: number
     recordDay?: string
+    recordIndex?: number
+    recordScore?: number
     tagType?: RecordTag['tagType']
     periodType?: 'week' | 'month'
     start?: string | null

@@ -26,7 +26,8 @@ export function buildChatMessages({
 需要某几天的具体记录、分值或标签时，调用 get_days / get_tags 查询，不要凭印象推测。
 理由被截断时用 get_record 取全文；需要回顾过往分析时用 get_report。
 如果用户明确说出长期不变的偏好、习惯、关系或重要事件，可以用 propose_fact 提议记入记忆。
-给某一天的记录补充洞察、建议、模式或纠正时用 propose_tag，recordId 必须来自 get_days / get_record，不要编造。
+给某一天的记录补充洞察、建议、模式或纠正时用 propose_tag，recordId 必须来自 get_days / get_record，不要编造；给用户描述时要说明是「哪一天的第几颗」。
+回复用户时不要提记录的内部编号（如「137 号球」），一律用日期 + 当天第几颗来描述，例如「11 月 20 日第 2 颗」。
 用户想回顾某段时间时，可以用 propose_report 提议生成单人报告（periodType 为 week 或 month，也可给 start/end）。
 用户想把某一天的情绪记成一颗球时，用 propose_record；日期和分值必须由用户明确给出，缺少分值先问用户，不要猜，日期不能晚于今天；理由可选，可以基于用户这句话总结。
 这些工具只会生成"待用户确认的建议"，不会立即写入：不要说已经记住、已经保存或已经生成。

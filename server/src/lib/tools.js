@@ -41,7 +41,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'get_days',
       description:
-        '读取指定日期范围内的情绪记录。返回每天的扭蛋：日期、分值、理由摘要、标签。单次跨度不能超过 90 天。',
+        '读取指定日期范围内的情绪记录。返回每天的扭蛋：id（仅内部使用的编号）、indexInDay（当天第几颗）、日期、分值、理由摘要、标签。单次跨度不能超过 90 天。',
       parameters: {
         type: 'object',
         properties: {
@@ -71,7 +71,7 @@ export const FUNCTION_TOOLS = [
     type: 'function',
     function: {
       name: 'get_record',
-      description: '读取某一条记录的完整内容（含未截断的理由）。当 get_days 返回 noteTruncated 时用它取全文。',
+      description: '读取某一条记录的完整内容（含未截断的理由，indexInDay 表示当天第几颗）。当 get_days 返回 noteTruncated 时用它取全文。',
       parameters: {
         type: 'object',
         properties: {
@@ -116,7 +116,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'propose_tag',
       description:
-        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。recordId 必须来自 get_days 或 get_record。只能新增，不能修改或删除已有标签。',
+        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。recordId 必须来自 get_days 或 get_record，只作为内部参数，回复用户时不要念编号，用「某天第几颗」描述。只能新增，不能修改或删除已有标签。',
       parameters: {
         type: 'object',
         properties: {
@@ -196,9 +196,11 @@ function getDays(userId, args) {
   }
 
   const total = rows.length
+  const dayCounter = {}
   const items = rows.slice(0, MAX_ITEMS).map((r) => {
     const note = String(r.note || '').replace(/\s+/g, ' ').trim()
-    const item = { id: r.id, day: r.day, score: r.score }
+    const indexInDay = (dayCounter[r.day] = (dayCounter[r.day] || 0) + 1)
+    const item = { id: r.id, day: r.day, indexInDay, score: r.score }
     if (r.original_score != null) item.originalScore = r.original_score
     if (note) {
       item.note = note.slice(0, NOTE_PREVIEW)
@@ -251,7 +253,10 @@ function getRecord(userId, args) {
     .get(id, userId)
   if (!r) return { ok: false, reason: 'not_found', hint: '没有找到这条记录' }
 
-  const item = { id: r.id, day: r.day, score: r.score, note: String(r.note || '') }
+  const indexInDay = db
+    .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
+    .get(userId, r.day, r.id).c
+  const item = { id: r.id, day: r.day, indexInDay, score: r.score, note: String(r.note || '') }
   if (r.original_score != null) item.originalScore = r.original_score
   if (r.adjusted_at) item.adjustedAt = r.adjusted_at
   return { ok: true, item }
@@ -384,7 +389,7 @@ function proposeTag(ctx, args) {
   if (!Number.isInteger(recordId) || recordId <= 0) {
     return { ok: false, reason: 'bad_args', hint: 'recordId 需要是正整数' }
   }
-  const record = db.prepare('SELECT id, day FROM records WHERE id = ? AND user_id = ?').get(recordId, ctx.userId)
+  const record = db.prepare('SELECT id, day, score FROM records WHERE id = ? AND user_id = ?').get(recordId, ctx.userId)
   if (!record) {
     return { ok: false, reason: 'not_found', hint: '没有找到这条记录，recordId 必须来自 get_days 或 get_record。' }
   }
@@ -402,7 +407,18 @@ function proposeTag(ctx, args) {
     return { ok: false, reason: 'already_exists', tagId: dup.id, hint: '这条记录已经有同样的标签了，不需要再提。' }
   }
 
-  return insertProposal(ctx, 'tag', { recordId, recordDay: record.day, tagType, content })
+  const recordIndex = db
+    .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
+    .get(ctx.userId, record.day, recordId).c
+
+  return insertProposal(ctx, 'tag', {
+    recordId,
+    recordDay: record.day,
+    recordIndex,
+    recordScore: record.score,
+    tagType,
+    content
+  })
 }
 
 function proposeReport(ctx, args) {
