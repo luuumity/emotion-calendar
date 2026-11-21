@@ -4,6 +4,7 @@ server/node_modules/
 client/dist/
 server/data/
 data/
+backups/
 .uploads/
 *.log
 .DS_Store
