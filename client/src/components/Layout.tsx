@@ -1,4 +1,4 @@
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from '../context/AuthContext'
 
@@ -18,6 +18,11 @@ export function CapsuleMark({ size = 30 }: { size?: number }) {
 
 export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth()
+  const location = useLocation()
+  const hideChatFab =
+    location.pathname.startsWith('/chat') ||
+    location.pathname.startsWith('/settings') ||
+    location.pathname.startsWith('/access')
 
   return (
     <div className="app-shell">
@@ -63,6 +68,22 @@ export function Layout({ children }: { children: ReactNode }) {
         <span className="footer-dot">·</span>
         <span>理由默认只有自己可见</span>
       </footer>
+
+      {!hideChatFab && (
+        <Link to="/chat" className="chat-fab" aria-label="打开聊一聊" title="打开聊一聊">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M12 4c-4.4 0-8 3-8 6.7 0 1.9.9 3.6 2.4 4.8L5.3 19l4-1.2c.9.2 1.8.3 2.7.3 4.4 0 8-3 8-6.7S16.4 4 12 4Z"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="chat-fab-plus" aria-hidden="true">
+            +
+          </span>
+        </Link>
+      )}
     </div>
   )
 }

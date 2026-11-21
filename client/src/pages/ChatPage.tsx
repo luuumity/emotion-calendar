@@ -173,7 +173,9 @@ export function ChatPage() {
         setSessions([res.session])
         setActiveId(res.session.id)
       } else {
-        await selectSession(list[0].id)
+        // 优先回到最近一个真正有消息的会话，避免落到空的新对话上
+        const target = list.find((s) => s.messageCount > 0) ?? list[0]
+        await selectSession(target.id)
       }
     })()
   }, [])
