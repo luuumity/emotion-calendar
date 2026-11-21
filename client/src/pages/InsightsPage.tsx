@@ -2,6 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type Insight, type AccessInfo, type Granted } from '../lib/api'
 
 type Tab = 'single' | 'couple'
+type PeriodType = 'week' | 'month' | 'manual'
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+function localDay(d = new Date()) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
 
 function formatPeriod(insight: Insight) {
   return `${insight.periodStart} ~ ${insight.periodEnd}`
@@ -79,6 +88,12 @@ export function InsightsPage() {
   const [generating, setGenerating] = useState(false)
   const [generateErr, setGenerateErr] = useState<string | null>(null)
   const [generateSuccess, setGenerateSuccess] = useState<string | null>(null)
+  const [periodType, setPeriodType] = useState<PeriodType>('week')
+  const [customStart, setCustomStart] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`
+  })
+  const [customEnd, setCustomEnd] = useState(() => localDay())
 
   async function load() {
     setLoading(true)
@@ -106,12 +121,33 @@ export function InsightsPage() {
   const grantedFull = useMemo(() => (access ? findGrantedFullOwners(access) : new Map()), [access])
 
   async function handleGenerateSingle() {
-    setGenerating(true)
     setGenerateErr(null)
     setGenerateSuccess(null)
+    if (periodType === 'manual') {
+      if (!customStart || !customEnd) {
+        setGenerateErr('请选择起始和结束日期')
+        return
+      }
+      if (customStart > customEnd) {
+        setGenerateErr('起始日期不能晚于结束日期')
+        return
+      }
+    }
+    setGenerating(true)
     try {
-      const res = await api.generateSingleInsight({ periodType: 'week' })
-      setGenerateSuccess(res.hasKey ? '报告已生成' : 'AI 服务未配置，返回了占位内容')
+      const body: { periodType: PeriodType; start?: string; end?: string } = { periodType }
+      if (periodType === 'manual') {
+        body.start = customStart
+        body.end = customEnd
+      }
+      const res = await api.generateSingleInsight(body)
+      setGenerateSuccess(
+        res.existing
+          ? '该周期的报告已存在，已为你展开'
+          : res.hasKey
+            ? '报告已生成'
+            : 'AI 服务未配置，返回了占位内容'
+      )
       await load()
       // 自动展开新生成的
       setExpandedId(res.insight.id)
@@ -120,6 +156,12 @@ export function InsightsPage() {
     } finally {
       setGenerating(false)
     }
+  }
+
+  async function handleDelete(insight: Insight) {
+    await api.deleteInsight(insight.id)
+    if (expandedId === insight.id) setExpandedId(null)
+    await load()
   }
 
   async function handleGenerateCouple(partnerId: number) {
@@ -171,14 +213,67 @@ export function InsightsPage() {
       {tab === 'single' && (
         <section className="insights-section">
           <div className="insights-actions">
-            <p className="insights-actions-hint">基于本周（周一～周日）的情绪记录生成一份分析。</p>
+            <div className="insights-actions-main">
+              <div className="insights-period-tabs">
+                {(
+                  [
+                    ['week', '本周'],
+                    ['month', '本月'],
+                    ['manual', '自定义']
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={'insights-period-tab ' + (periodType === value ? 'active' : '')}
+                    onClick={() => setPeriodType(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {periodType === 'manual' && (
+                <div className="insights-custom-range">
+                  <input
+                    type="date"
+                    value={customStart}
+                    max={customEnd || undefined}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    aria-label="起始日期"
+                  />
+                  <span>至</span>
+                  <input
+                    type="date"
+                    value={customEnd}
+                    min={customStart || undefined}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    aria-label="结束日期"
+                  />
+                </div>
+              )}
+
+              <p className="insights-actions-hint">
+                {periodType === 'week'
+                  ? '基于本周（周一～周日）的情绪记录生成一份分析。'
+                  : periodType === 'month'
+                    ? '基于本月（1 号～月末）的情绪记录生成一份分析。'
+                    : '选择一段日期，基于这段时间内的情绪记录生成分析。'}
+              </p>
+            </div>
             <button
               type="button"
               className="primary-btn"
               onClick={handleGenerateSingle}
               disabled={generating}
             >
-              {generating ? '生成中…' : '生成本周报告'}
+              {generating
+                ? '生成中…'
+                : periodType === 'week'
+                  ? '生成本周报告'
+                  : periodType === 'month'
+                    ? '生成本月报告'
+                    : '生成自定义报告'}
             </button>
           </div>
 
@@ -200,6 +295,7 @@ export function InsightsPage() {
                   insight={ins}
                   expanded={expandedId === ins.id}
                   onToggle={() => setExpandedId((prev) => (prev === ins.id ? null : ins.id))}
+                  onDelete={() => handleDelete(ins)}
                 />
               ))}
             </div>
@@ -258,6 +354,7 @@ export function InsightsPage() {
                   insight={ins}
                   expanded={expandedId === ins.id}
                   onToggle={() => setExpandedId((prev) => (prev === ins.id ? null : ins.id))}
+                  onDelete={() => handleDelete(ins)}
                 />
               ))}
             </div>
@@ -271,12 +368,36 @@ export function InsightsPage() {
 function InsightCard({
   insight,
   expanded,
-  onToggle
+  onToggle,
+  onDelete
 }: {
   insight: Insight
   expanded: boolean
   onToggle: () => void
+  onDelete: () => Promise<void>
 }) {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteErr, setDeleteErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!expanded) {
+      setConfirming(false)
+      setDeleteErr(null)
+    }
+  }, [expanded])
+
+  async function handleDelete() {
+    setDeleting(true)
+    setDeleteErr(null)
+    try {
+      await onDelete()
+    } catch (e) {
+      setDeleteErr(e instanceof Error ? e.message : '删除失败')
+      setDeleting(false)
+    }
+  }
+
   return (
     <article className={'insight-card card ' + (expanded ? 'expanded' : '')}>
       <header className="insight-card-head" onClick={onToggle} role="button" tabIndex={0}
@@ -300,6 +421,42 @@ function InsightCard({
           {insight.content.split('\n').map((line, i) => (
             <p key={i}>{line || '\u00A0'}</p>
           ))}
+
+          <div className="insight-delete-row">
+            {confirming ? (
+              <>
+                <span className="insight-delete-warn">
+                  {insight.scope === 'couple' ? '删除后你和对方都将无法查看，' : ''}
+                  确认删除这份报告？
+                </span>
+                <button
+                  type="button"
+                  className="ghost-btn small danger"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? '删除中…' : '确认删除'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn small"
+                  onClick={() => setConfirming(false)}
+                  disabled={deleting}
+                >
+                  取消
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="ghost-btn small danger"
+                onClick={() => setConfirming(true)}
+              >
+                删除这份报告
+              </button>
+            )}
+          </div>
+          {deleteErr && <p className="insight-delete-error">{deleteErr}</p>}
         </div>
       ) : (
         <p className="insight-summary">{summarize(insight.content, 220)}</p>

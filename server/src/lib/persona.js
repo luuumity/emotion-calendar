@@ -58,11 +58,26 @@ export function serializePersona(opts) {
   }
 
   if (singleInsights.length) {
-    lines.push(`【${displayName} 过往自我分析摘要】`)
-    for (const ins of singleInsights.slice(-3)) {
-      lines.push(`- ${ins.periodStart} ~ ${ins.periodEnd}: ${ins.summary || ins.content?.slice(0, 200) || '(无)'} `)
+    // 来源可能是驼峰（periodStart）或下划线（period_start）字段，统一后再按时间排序。
+    // 输入通常是最新在前，这里归一化并按周期升序，取最后 3 条 = 最新 3 条，按时间顺序展示。
+    const recent = singleInsights
+      .map((ins) => ({
+        periodStart: ins.periodStart || ins.period_start || '',
+        periodEnd: ins.periodEnd || ins.period_end || '',
+        summary: ins.summary || ins.content || ''
+      }))
+      .filter((ins) => ins.periodStart)
+      .sort((a, b) => a.periodStart.localeCompare(b.periodStart))
+      .slice(-3)
+
+    if (recent.length) {
+      lines.push(`【${displayName} 过往自我分析摘要】`)
+      for (const ins of recent) {
+        const period = ins.periodEnd ? `${ins.periodStart} ~ ${ins.periodEnd}` : ins.periodStart
+        lines.push(`- ${period}: ${ins.summary.slice(0, 200) || '(无)'} `)
+      }
+      lines.push(``)
     }
-    lines.push(``)
   }
 
   if (recentChats.length) {

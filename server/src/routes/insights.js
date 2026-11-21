@@ -70,7 +70,9 @@ function view(row) {
 
 function computePeriod(periodType, anchor = new Date()) {
   // anchor 是 Date 对象，periodType: week/month/manual → 返回 {start, end} (YYYY-MM-DD)
-  const a = new Date(anchor)
+  // 周期按 Asia/Shanghai 计算：先整体 +8 小时，再用 UTC 字段读取当地日历日期，
+  // 避免服务器跑在 UTC 时，凌晨 0-8 点被算到前一天 / 上一周 / 上个月。
+  const a = new Date(anchor.getTime() + 8 * 3600 * 1000)
   a.setUTCHours(0, 0, 0, 0)
   if (periodType === 'week') {
     const day = a.getUTCDay() || 7 // 周几（0=周日 → 7=周日）
@@ -119,6 +121,25 @@ router.get('/:id', (req, res) => {
   res.json({ insight: view(row) })
 })
 
+// 删除报告：单人仅本人；双人仅该 couple 的成员（删除后双方都看不到）
+router.delete('/:id', (req, res) => {
+  const id = toInt(req.params.id)
+  if (!id) return res.status(400).json({ error: '无效的报告编号' })
+  const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(id)
+  if (!row) return res.status(404).json({ error: '没有找到这份报告' })
+
+  if (row.scope === 'single') {
+    if (row.user_id !== req.user.id) return res.status(403).json({ error: '无权删除' })
+  } else if (row.scope === 'couple') {
+    if (!isInCouple(row.couple_key, req.user.id)) return res.status(403).json({ error: '无权删除' })
+  } else {
+    return res.status(403).json({ error: '无权删除' })
+  }
+
+  db.prepare('DELETE FROM insights WHERE id = ?').run(id)
+  res.json({ ok: true })
+})
+
 // ======== 单人报告生成 ========
 
 /**
@@ -145,8 +166,33 @@ function collectSinglePersonaData(userId) {
   return { displayName, facts, tags, singleInsights, recentChats }
 }
 
-function generateSingleInsightSync({ userId, periodType = 'week', customStart, customEnd }) {
+/** 查找已存在的单人报告。自定义周期以 start+end 共同判定，避免起点相同、终点不同被误判为重复。 */
+function findExistingSingleInsight(userId, periodType, start, end) {
+  if (periodType === 'manual') {
+    return db
+      .prepare(
+        `SELECT * FROM insights WHERE scope = 'single' AND user_id = ? AND period_type = 'manual'
+         AND period_start = ? AND period_end = ? ORDER BY id DESC LIMIT 1`
+      )
+      .get(userId, start, end)
+  }
+  return db
+    .prepare(
+      `SELECT * FROM insights WHERE scope = 'single' AND user_id = ? AND period_type = ? AND period_start = ?
+       ORDER BY id DESC LIMIT 1`
+    )
+    .get(userId, periodType, start)
+}
+
+async function generateSingleInsightSync({ userId, periodType = 'week', customStart, customEnd }) {
   const { start, end } = customStart && customEnd ? { start: customStart, end: customEnd } : computePeriod(periodType)
+
+  // 先查重：已存在就直接返回，不再调用模型，避免白花 token、也避免误报“已生成”
+  const existing = findExistingSingleInsight(userId, periodType, start, end)
+  if (existing) {
+    return { insight: view(existing), usage: null, hasKey: hasDeepSeekKey(), existing: true }
+  }
+
   const now = new Date().toISOString()
 
   // 取周期内记录
@@ -163,23 +209,26 @@ function generateSingleInsightSync({ userId, periodType = 'week', customStart, c
 
   const messages = buildSingleReportMessages({ personaBlock, periodStart: start, periodEnd: end, records })
 
-  // 调模型
-  return callDeepSeek(messages).then((result) => {
-    // 写 insights。部分唯一索引会自动拦重复——同一用户 + 同周期类型 + 同起点 = 唯一
-    db.prepare(
+  const result = await callDeepSeek(messages)
+
+  // 写 insights。部分唯一索引会自动拦重复——同一用户 + 同周期类型 + 同起点 = 唯一。
+  // 若并发请求在模型返回前抢先写入，这里 changes = 0，直接返回已存在的那份。
+  const info = db
+    .prepare(
       `INSERT OR IGNORE INTO insights
         (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, tokens, generated_at)
        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run('single', userId, periodType, start, end, result.content, result.model, 'single-v1', result.usage.total_tokens || 0, now)
+    )
+    .run('single', userId, periodType, start, end, result.content, result.model, 'single-v1', result.usage.total_tokens || 0, now)
 
-    const row = db.prepare('SELECT * FROM insights WHERE scope = ? AND user_id = ? AND period_start = ? AND period_type = ? ORDER BY id DESC LIMIT 1').get('single', userId, start, periodType)
-    return { insight: view(row), usage: result.usage, hasKey: hasDeepSeekKey() }
-  })
+  const row = findExistingSingleInsight(userId, periodType, start, end)
+  return { insight: view(row), usage: result.usage, hasKey: hasDeepSeekKey(), existing: info.changes === 0 }
 }
 
 // POST /api/insights/single/generate  手动触发单人报告
 router.post('/single/generate', async (req, res) => {
-  const periodType = req.body?.periodType === 'month' ? 'month' : 'week'
+  const requestedType = req.body?.periodType
+  const periodType = requestedType === 'month' ? 'month' : 'week'
   // 支持指定周期（手动 = 自定义）
   const rawStart = String(req.body?.start ?? '').trim()
   const rawEnd = String(req.body?.end ?? '').trim()
@@ -197,10 +246,12 @@ router.post('/single/generate', async (req, res) => {
   }
   const customStart = hasStart ? rawStart : null
   const customEnd = hasEnd ? rawEnd : null
+  // 自定义区间统一按 manual 存储；普通 week/month 用各自类型
+  const effectiveType = customStart && customEnd ? 'manual' : periodType
 
   try {
-    const result = await generateSingleInsightSync({ userId: req.user.id, periodType, customStart, customEnd })
-    res.status(201).json(result)
+    const result = await generateSingleInsightSync({ userId: req.user.id, periodType: effectiveType, customStart, customEnd })
+    res.status(result.existing ? 200 : 201).json(result)
   } catch (err) {
     console.error('[insights] 单人报告生成失败:', err.message)
     res.status(500).json({ error: '生成失败，请稍后再试' })

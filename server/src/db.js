@@ -306,6 +306,22 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_chat_proposals_session ON chat_proposals(session_id, status);
       `)
     }
+  },
+  {
+    version: 10,
+    // 自定义区间（manual）的报告可以起点相同、终点不同，唯一键需要带上 period_end。
+    // week/month 仍按 (user_id, period_type, period_start) 去重。
+    up() {
+      db.exec(`
+        DROP INDEX IF EXISTS idx_insights_single_unique;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_single_unique
+          ON insights(user_id, period_type, period_start)
+          WHERE scope = 'single' AND period_type != 'manual';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_insights_single_manual_unique
+          ON insights(user_id, period_start, period_end)
+          WHERE scope = 'single' AND period_type = 'manual';
+      `)
+    }
   }
 ]
 

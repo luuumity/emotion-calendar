@@ -2738,6 +2738,70 @@ p {
   box-shadow: var(--shadow-sm);
 }
 
+.insights-actions-main {
+  display: grid;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.insights-period-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f2ece1;
+  border-radius: 999px;
+  padding: 3px;
+  width: fit-content;
+}
+
+.insights-period-tab {
+  border: none;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.insights-period-tab:hover {
+  color: var(--ink);
+}
+
+.insights-period-tab.active {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgba(90, 68, 45, 0.1);
+}
+
+.insights-custom-range {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+
+.insights-custom-range input {
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fbf8f1;
+  padding: 0 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.insights-custom-range input:focus {
+  outline: none;
+  border-color: rgba(242, 112, 95, 0.55);
+  box-shadow: 0 0 0 3px rgba(242, 112, 95, 0.12);
+}
+
 .insights-actions-hint {
   font-size: 13px;
   color: var(--ink-soft);
@@ -2827,6 +2891,26 @@ p {
   line-height: 1.8;
   color: var(--ink);
   white-space: pre-wrap;
+}
+
+.insight-delete-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.insight-delete-warn {
+  font-size: 12.5px;
+  color: var(--coral-deep);
+}
+
+.insight-delete-error {
+  font-size: 12.5px;
+  color: var(--coral-deep);
 }
 
 /* 双人报告生成卡片 */

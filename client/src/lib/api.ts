@@ -242,10 +242,14 @@ export const api = {
   insights: () => request<{ insights: Insight[] }>('/insights'),
   insight: (id: number) => request<{ insight: Insight }>(`/insights/${id}`),
   generateSingleInsight: (body: { periodType?: 'week' | 'month' | 'manual'; start?: string; end?: string }) =>
-    request<{ insight: Insight; usage?: { total_tokens: number }; hasKey?: boolean }>('/insights/single/generate', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    }),
+    request<{ insight: Insight; usage?: { total_tokens: number } | null; hasKey?: boolean; existing?: boolean }>(
+      '/insights/single/generate',
+      {
+        method: 'POST',
+        body: JSON.stringify(body)
+      }
+    ),
+  deleteInsight: (id: number) => request<{ ok: true }>(`/insights/${id}`, { method: 'DELETE' }),
   generateCoupleInsight: (partnerId: number) =>
     request<{ insight: Insight; usage?: { total_tokens: number }; hasKey?: boolean }>('/insights/couple/generate', {
       method: 'POST',
