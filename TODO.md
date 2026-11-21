@@ -616,6 +616,9 @@ propose_report({ start, end })
 - [x] P1b：压缩触发从「12 条」改为「历史估算 token > 4000 或未压缩消息 > 40 条」，用实测 usage 校准比例；v7 迁移记录 `prompt_tokens/prompt_chars`，供校准与成本统计。历史全文回放（60 条仅作熔断），摘要输入按 24000 字符预算取完整消息
 - [x] P2b：`couple_memory` 真摘要——旧记忆 + 本期增量记录单独调一次压缩（≤300 字），不再截取报告开头；失败退回旧行为。实测两轮增量后记忆仍保留首轮事件
 - [x] P3a：写协议（propose_fact / propose_tag / propose_report + `/api/proposals` 确认接口 + 聊天确认卡片）；报告提议只支持单人，采纳后由前端触发生成；双人报告等 `get_partners` 再做
+- [x] P3b：提议闭环——v9 重建 `chat_proposals`（`record` / `expired` / `final_payload` / `edited`）；fact/tag 卡片内容可直接编辑后采纳；发新消息时剩余 pending 一律作废；历史之后、本轮 user 之前插入一条临时 system，汇总自上次回复以来的采纳/作废/修改（不落库）；标签采纳时按记录+类型+内容查重
+- [x] P3c：长期记忆管理页——设置页新增「长期记忆」tab，支持查看、添加、行内编辑、置顶、控制对另一半可见、删除；聊天会话列表底部提供跳转入口
+- [ ] 下一阶段：`propose_record`（新增某日的球）——v9 已允许 `record` 类型，无需再迁表；卡片可编辑日期/分值/理由，确认后插入新记录，不自动合并当天已有球
 - [ ] P4：流式输出 + run 生命周期（断线补全）
 - [x] 前置实测：服务端工具与客户端 function tools 共存（可用）；`deepseek_read_url` 对 B 站可用、对小红书被拦
 - [ ] 前置实测：流式下的 `tool_calls` 分片拼接（等 P4）

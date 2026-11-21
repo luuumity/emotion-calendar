@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api } from '../lib/api'
+import { api, type Fact } from '../lib/api'
 import { errorMessage, useAuth } from '../context/AuthContext'
 import { AccessPanel } from './AccessPage'
 import {
@@ -216,16 +216,216 @@ function ReminderPanel() {
   )
 }
 
+function sourceLabel(source: Fact['source']) {
+  if (source === 'agent_extracted') return '对话提取'
+  if (source === 'report_derived') return '报告提炼'
+  return '你添加'
+}
+
+function MemoryItem({
+  fact,
+  onChange,
+  onDelete
+}: {
+  fact: Fact
+  onChange: (next: Fact) => void
+  onDelete: (id: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(fact.content)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function patch(next: { content?: string; pinned?: boolean; coupleVisible?: boolean }) {
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.updateFact(fact.id, next)
+      onChange(res.fact)
+      return true
+    } catch (err) {
+      setError(errorMessage(err))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function save() {
+    const content = text.trim()
+    if (!content) {
+      setError('内容不能为空')
+      return
+    }
+    if (await patch({ content })) setEditing(false)
+  }
+
+  async function remove() {
+    if (!window.confirm('删除这条长期记忆？')) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.deleteFact(fact.id)
+      onDelete(fact.id)
+    } catch (err) {
+      setError(errorMessage(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <li className={'memory-item' + (fact.pinned ? ' pinned' : '')}>
+      <div className="memory-item-head">
+        <span className={`memory-source ${fact.source}`}>{sourceLabel(fact.source)}</span>
+        {fact.pinned && <span className="memory-pin">置顶</span>}
+        <span className="memory-date">{fact.updatedAt.slice(0, 10)}</span>
+      </div>
+
+      {editing ? (
+        <textarea
+          className="memory-edit"
+          value={text}
+          maxLength={500}
+          rows={2}
+          autoFocus
+          onChange={(e) => setText(e.target.value)}
+        />
+      ) : (
+        <p className="memory-content">{fact.content}</p>
+      )}
+
+      <div className="memory-actions">
+        {editing ? (
+          <>
+            <button type="button" className="primary-btn small" onClick={save} disabled={busy}>
+              {busy ? '保存中…' : '保存'}
+            </button>
+            <button
+              type="button"
+              className="ghost-btn small"
+              disabled={busy}
+              onClick={() => {
+                setEditing(false)
+                setText(fact.content)
+                setError('')
+              }}
+            >
+              取消
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="ghost-btn small" onClick={() => patch({ pinned: !fact.pinned })} disabled={busy}>
+              {fact.pinned ? '取消置顶' : '置顶'}
+            </button>
+            <label className="memory-visible">
+              <input
+                type="checkbox"
+                checked={fact.coupleVisible}
+                disabled={busy}
+                onChange={() => patch({ coupleVisible: !fact.coupleVisible })}
+              />
+              对另一半可见
+            </label>
+            <button type="button" className="ghost-btn small" onClick={() => setEditing(true)} disabled={busy}>
+              编辑
+            </button>
+            <button type="button" className="ghost-btn small danger" onClick={remove} disabled={busy}>
+              删除
+            </button>
+          </>
+        )}
+      </div>
+
+      {error && <div className="banner error">{error}</div>}
+    </li>
+  )
+}
+
+function MemoryPanel() {
+  const [facts, setFacts] = useState<Fact[]>([])
+  const [draft, setDraft] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    api
+      .facts()
+      .then((res) => setFacts(res.facts))
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function add(e: FormEvent) {
+    e.preventDefault()
+    const content = draft.trim()
+    if (!content) return
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.createFact({ content })
+      setFacts((list) => [res.fact, ...list])
+      setDraft('')
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function replace(next: Fact) {
+    setFacts((list) => list.map((f) => (f.id === next.id ? next : f)))
+  }
+
+  const sorted = [...facts].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.id - a.id)
+
+  return (
+    <div>
+      <p className="settings-note">
+        Agent 在对话中了解到的长期信息会先征求你的确认，确认后才出现在这里。你可以随时修改、置顶、控制是否对另一半可见，或删除。
+      </p>
+
+      <form className="memory-add" onSubmit={add}>
+        <input
+          value={draft}
+          maxLength={500}
+          placeholder="添加一条，例如：不喜欢香菜"
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <button type="submit" className="primary-btn" disabled={busy || !draft.trim()}>
+          {busy ? '添加中…' : '添加'}
+        </button>
+      </form>
+
+      {error && <div className="banner error">{error}</div>}
+
+      {loading ? (
+        <p className="settings-note">加载中…</p>
+      ) : sorted.length ? (
+        <ul className="memory-list">
+          {sorted.map((f) => (
+            <MemoryItem key={f.id} fact={f} onChange={replace} onDelete={(id) => setFacts((list) => list.filter((x) => x.id !== id))} />
+          ))}
+        </ul>
+      ) : (
+        <p className="settings-note">还没有长期记忆。在「聊一聊」里告诉 Agent 一些长期信息，确认后就会出现在这里。</p>
+      )}
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const [params, setParams] = useSearchParams()
-  const tab = params.get('tab') === 'reminder' ? 'reminder' : 'access'
+  const rawTab = params.get('tab')
+  const tab = rawTab === 'reminder' || rawTab === 'memory' ? rawTab : 'access'
 
   return (
     <div className="page settings-page">
       <section className="page-head">
         <div>
           <h1>设置</h1>
-          <p className="sub">在这里管理谁能看到你的记录，以及每天几点提醒你。</p>
+          <p className="sub">在这里管理谁能看到你的记录、每天几点提醒你，以及 Agent 记住的长期信息。</p>
         </div>
       </section>
 
@@ -248,15 +448,22 @@ export function SettingsPage() {
         >
           提醒设置
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'memory'}
+          className={tab === 'memory' ? 'settings-tab active' : 'settings-tab'}
+          onClick={() => setParams({ tab: 'memory' }, { replace: true })}
+        >
+          长期记忆
+        </button>
       </div>
 
       <div className="settings-body">
         {tab === 'access' ? (
           <AccessPanel />
         ) : (
-          <div className="settings-narrow">
-            <ReminderPanel />
-          </div>
+          <div className="settings-narrow">{tab === 'reminder' ? <ReminderPanel /> : <MemoryPanel />}</div>
         )}
       </div>
     </div>

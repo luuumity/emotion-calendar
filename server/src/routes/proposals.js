@@ -38,6 +38,8 @@ function view(row) {
     kind: row.kind,
     status: row.status,
     payload: parsePayload(row),
+    finalPayload: row.final_payload ? parsePayload({ payload: row.final_payload }) : null,
+    edited: Boolean(row.edited),
     coupleVisible: Boolean(row.couple_visible),
     resultRefId: row.result_ref_id,
     createdAt: row.created_at,
@@ -72,13 +74,24 @@ function tagView(row) {
   }
 }
 
-function acceptFact(row, coupleVisible) {
-  const payload = parsePayload(row)
-  const content = typeof payload?.content === 'string' ? payload.content.trim() : ''
-  if (!content || content.length > 500) return { error: '事实内容已失效', status: 400 }
+function acceptFact(row, coupleVisible, override) {
+  const payload = parsePayload(row) || {}
+  const baseContent = typeof payload.content === 'string' ? payload.content.trim() : ''
+  const content =
+    override && override.content !== undefined
+      ? typeof override.content === 'string'
+        ? override.content.trim()
+        : ''
+      : baseContent
+  if (!content || content.length > 500) return { error: '事实内容需为 1-500 字', status: 400 }
 
-  const confidence = Number(payload.confidence)
-  const conf = Number.isInteger(confidence) && confidence >= 1 && confidence <= 5 ? confidence : 3
+  const baseConfidence = Number(payload.confidence)
+  const baseConf = Number.isInteger(baseConfidence) && baseConfidence >= 1 && baseConfidence <= 5 ? baseConfidence : 3
+  const inputConfidence =
+    override && override.confidence !== undefined ? Number(override.confidence) : baseConf
+  const conf = Number.isInteger(inputConfidence) && inputConfidence >= 1 && inputConfidence <= 5 ? inputConfidence : baseConf
+  const edited = content !== baseContent || conf !== baseConf ? 1 : 0
+  const finalPayload = JSON.stringify({ ...payload, content, confidence: conf })
   const now = nowIso()
 
   return db.transaction(() => {
@@ -94,20 +107,30 @@ function acceptFact(row, coupleVisible) {
       factRow = db.prepare('SELECT * FROM facts WHERE id = ?').get(info.lastInsertRowid)
     }
     const changed = db
-      .prepare(`UPDATE chat_proposals SET status = 'accepted', couple_visible = ?, result_ref_id = ?, decided_at = ? WHERE id = ? AND status = 'pending'`)
-      .run(coupleVisible, factRow.id, now, row.id)
+      .prepare(
+        `UPDATE chat_proposals
+         SET status = 'accepted', couple_visible = ?, result_ref_id = ?, final_payload = ?, edited = ?, decided_at = ?
+         WHERE id = ? AND status = 'pending'`
+      )
+      .run(coupleVisible, factRow.id, finalPayload, edited, now, row.id)
     if (!changed.changes) return { error: '这条提议已经处理过了', status: 409 }
     return { fact: factView(factRow) }
   })()
 }
 
-function acceptTag(row, coupleVisible) {
-  const payload = parsePayload(row)
+function acceptTag(row, coupleVisible, override) {
+  const payload = parsePayload(row) || {}
   const recordId = toInt(payload?.recordId)
   const tagType = TAG_TYPES.includes(payload?.tagType) ? payload.tagType : null
-  const content = typeof payload?.content === 'string' ? payload.content.trim() : ''
+  const baseContent = typeof payload.content === 'string' ? payload.content.trim() : ''
+  const content =
+    override && override.content !== undefined
+      ? typeof override.content === 'string'
+        ? override.content.trim()
+        : ''
+      : baseContent
   if (!recordId || !tagType || !content || content.length > 500) {
-    return { error: '标签内容已失效', status: 400 }
+    return { error: '标签内容需为 1-500 字', status: 400 }
   }
 
   const record = db.prepare('SELECT id FROM records WHERE id = ? AND user_id = ?').get(recordId, row.user_id)
@@ -117,7 +140,15 @@ function acceptTag(row, coupleVisible) {
     return { error: '这条记录已经不在了，建议已失效', status: 404 }
   }
 
+  const dup = db
+    .prepare('SELECT id FROM record_tags WHERE record_id = ? AND tag_type = ? AND content = ?')
+    .get(recordId, tagType, content)
+  if (dup) return { error: '这条记录已经有相同内容的标签了', status: 409 }
+
+  const edited = content !== baseContent ? 1 : 0
+  const finalPayload = JSON.stringify({ ...payload, content })
   const now = nowIso()
+
   return db.transaction(() => {
     const info = db
       .prepare(
@@ -126,8 +157,12 @@ function acceptTag(row, coupleVisible) {
       )
       .run(recordId, row.user_id, tagType, content, row.message_id, coupleVisible, now)
     const changed = db
-      .prepare(`UPDATE chat_proposals SET status = 'accepted', couple_visible = ?, result_ref_id = ?, decided_at = ? WHERE id = ? AND status = 'pending'`)
-      .run(coupleVisible, info.lastInsertRowid, now, row.id)
+      .prepare(
+        `UPDATE chat_proposals
+         SET status = 'accepted', couple_visible = ?, result_ref_id = ?, final_payload = ?, edited = ?, decided_at = ?
+         WHERE id = ? AND status = 'pending'`
+      )
+      .run(coupleVisible, info.lastInsertRowid, finalPayload, edited, now, row.id)
     if (!changed.changes) return { error: '这条提议已经处理过了', status: 409 }
     return { tag: tagView(db.prepare('SELECT * FROM record_tags WHERE id = ?').get(info.lastInsertRowid)) }
   })()
@@ -166,10 +201,12 @@ router.post('/:id/accept', (req, res) => {
   }
 
   const coupleVisible = toFlag(req.body?.coupleVisible)
+  const override = req.body?.payload && typeof req.body.payload === 'object' ? req.body.payload : null
   let result
-  if (row.kind === 'fact') result = acceptFact(row, coupleVisible)
-  else if (row.kind === 'tag') result = acceptTag(row, coupleVisible)
-  else result = acceptReport(row)
+  if (row.kind === 'fact') result = acceptFact(row, coupleVisible, override)
+  else if (row.kind === 'tag') result = acceptTag(row, coupleVisible, override)
+  else if (row.kind === 'report') result = acceptReport(row)
+  else result = { error: '暂不支持这类提议', status: 400 }
 
   if (result.error) return res.status(result.status).json({ error: result.error, proposal: view(row) })
 

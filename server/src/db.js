@@ -271,6 +271,41 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_chat_proposals_session ON chat_proposals(session_id, status);
       `)
     }
+  },
+  {
+    version: 9,
+    // 提议闭环：允许 record 类型、expired 状态；记录用户是否改过内容
+    // SQLite 改不了 CHECK，只能重建表
+    up() {
+      db.exec(`
+        CREATE TABLE chat_proposals_v9 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          message_id INTEGER REFERENCES chat_messages(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('fact', 'tag', 'report', 'record')),
+          payload TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'expired')),
+          couple_visible INTEGER NOT NULL DEFAULT 0,
+          result_ref_id INTEGER,
+          final_payload TEXT,
+          edited INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          decided_at TEXT
+        );
+
+        INSERT INTO chat_proposals_v9
+          (id, user_id, session_id, message_id, kind, payload, status, couple_visible, result_ref_id, final_payload, edited, created_at, decided_at)
+        SELECT id, user_id, session_id, message_id, kind, payload, status, couple_visible, result_ref_id, NULL, 0, created_at, decided_at
+        FROM chat_proposals;
+
+        DROP TABLE chat_proposals;
+        ALTER TABLE chat_proposals_v9 RENAME TO chat_proposals;
+
+        CREATE INDEX IF NOT EXISTS idx_chat_proposals_message ON chat_proposals(message_id);
+        CREATE INDEX IF NOT EXISTS idx_chat_proposals_session ON chat_proposals(session_id, status);
+      `)
+    }
   }
 ]
 

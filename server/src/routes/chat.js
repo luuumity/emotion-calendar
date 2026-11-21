@@ -203,6 +203,55 @@ function buildFactsBlock(userId) {
   return '【关于用户的稳定事实】\n' + facts.map((f) => `- ${f.content}`).join('\n')
 }
 
+function parseJson(text) {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+// 自上次回复以来用户处理过的提议，拼成一段临时 system（只在本轮请求里出现，不落库）
+export function buildProposalNotice(sessionId, userId, since) {
+  const rows = db
+    .prepare(
+      `SELECT kind, status, payload, final_payload, edited FROM chat_proposals
+       WHERE session_id = ? AND user_id = ? AND status != 'pending'
+         AND decided_at IS NOT NULL AND decided_at > ?
+       ORDER BY decided_at ASC, id ASC LIMIT 5`
+    )
+    .all(sessionId, userId, since || '')
+  if (!rows.length) return ''
+
+  const KIND = { fact: '长期记忆', tag: '标签', report: '报告', record: '记录' }
+  const STATUS = { accepted: '已采纳', rejected: '已拒绝', expired: '未处理，已作废' }
+  const lines = rows.map((r) => {
+    const payload = parseJson(r.final_payload || r.payload) || {}
+    let preview = ''
+    if (r.kind === 'report') {
+      preview = payload.periodType === 'month' ? '月度报告' : '周度报告'
+    } else if (r.kind === 'record') {
+      preview = `${payload.day || ''} ${payload.score != null ? `${payload.score}分` : ''} ${payload.note || ''}`.trim()
+    } else {
+      preview = String(payload.content || '')
+    }
+    preview = preview.replace(/\s+/g, ' ').slice(0, 40)
+
+    let status = STATUS[r.status] || r.status
+    if (r.status === 'accepted' && r.edited) status = '已采纳（用户修改后保存）'
+    if (r.status === 'accepted' && r.kind === 'report') {
+      status = '已采纳，前端会触发生成；如需确认结果用 get_report 查'
+    }
+    return `- [${KIND[r.kind] || r.kind}] ${status}：${preview}`
+  })
+
+  return [
+    '自上一条回复以来，用户处理了这些建议：',
+    ...lines,
+    '不要主动催促用户，也不要重复提议；需要时以库里的最终内容为准。'
+  ].join('\n')
+}
+
 // 纯防失控的安全阈值，不是产品级限制
 const MAX_TOOL_STEPS = 8
 
@@ -295,12 +344,22 @@ router.post('/sessions/:id/messages', async (req, res) => {
 
   if (!content) return res.status(400).json({ error: '消息不能为空' })
 
-  // 0. 压缩：必须在写入本轮消息之前，否则本轮会被误压进摘要
+  // 0. 用户没确认上一轮的建议就继续提问：剩余 pending 一律作废
+  const lastAssistantAt =
+    db.prepare(`SELECT created_at FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`).get(id)
+      ?.created_at || ''
+  db.prepare(
+    `UPDATE chat_proposals SET status = 'expired', decided_at = ?
+     WHERE session_id = ? AND user_id = ? AND status = 'pending'`
+  ).run(nowIso(), id, req.user.id)
+  const proposalNotice = buildProposalNotice(id, req.user.id, lastAssistantAt)
+
+  // 1. 压缩：必须在写入本轮消息之前，否则本轮会被误压进摘要
   const compressed = await ensureCompressed(id)
 
   const now = nowIso()
 
-  // 1. 存 user 消息
+  // 2. 存 user 消息
   const userInfo = db
     .prepare('INSERT INTO chat_messages (session_id, role, content, refs, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(id, 'user', content, refs.length ? JSON.stringify(refs) : null, now)
@@ -316,7 +375,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
     db.prepare('UPDATE chat_sessions SET title = ? WHERE id = ?').run(autoTitle, id)
   }
 
-  // 2. 历史：真实 user/assistant 消息（已压缩的部分不再重复发送）
+  // 3. 历史：真实 user/assistant 消息（已压缩的部分不再重复发送）
   // 条数上限只是压缩降级时的熔断，正常由 token 阈值压缩兜底
   const history = db
     .prepare(
@@ -329,13 +388,13 @@ router.post('/sessions/:id/messages', async (req, res) => {
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role, content: String(m.content || '') }))
 
-  // 3. 稳定块 / 事实 / 记忆块 / 压缩摘要
+  // 4. 稳定块 / 事实 / 记忆块 / 压缩摘要
   const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(req.user.id)?.display_name || '用户'
   const factsBlock = buildFactsBlock(req.user.id)
   const memoryBlock = buildMemoryBlock(req.user.id)
   const summaryBlock = compressed.summary ? `【本次对话的早期摘要】\n${compressed.summary}` : ''
 
-  // 4. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史 → 本轮
+  // 5. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史 → 临时提示 → 本轮
   const messages = buildChatMessages({
     personaPrompt: getDefaultSystemPrompt(),
     displayName,
@@ -343,6 +402,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
     memoryBlock,
     summaryBlock,
     history,
+    noticeBlock: proposalNotice,
     userMessage: content,
     refs
   })
@@ -353,7 +413,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
   try {
     const result = await runWithTools(messages, { userId: req.user.id, sessionId: id, run })
 
-    // 5. 存 assistant 回复（模型只提议时可能没有正文，给一句兜底）
+    // 6. 存 assistant 回复（模型只提议时可能没有正文，给一句兜底）
     const assistantText = result.content || (run.proposalIds.length ? '我整理了几条建议，等你确认。' : '')
     const assistantInfo = db
       .prepare(
@@ -361,7 +421,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
       )
       .run(id, 'assistant', assistantText, result.lastPromptTokens, result.lastPromptChars, nowIso())
 
-    // 6. 把本轮提议绑定到这条 assistant 消息
+    // 7. 把本轮提议绑定到这条 assistant 消息
     if (run.proposalIds.length) {
       const placeholders = run.proposalIds.map(() => '?').join(',')
       db.prepare(
@@ -370,7 +430,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
       ).run(assistantInfo.lastInsertRowid, id, req.user.id, ...run.proposalIds)
     }
 
-    // 7. 返回
+    // 8. 返回
     const assistantMsg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(assistantInfo.lastInsertRowid)
     const proposals = run.proposalIds.length
       ? db

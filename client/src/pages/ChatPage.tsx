@@ -13,6 +13,7 @@ function formatTime(iso: string) {
 }
 
 export function ChatPage() {
+  const navigate = useNavigate()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeId, setActiveId] = useState<number | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -150,6 +151,14 @@ export function ChatPage() {
       createdAt: new Date().toISOString()
     }
     setMessages((prev) => [...prev, optimisticUser])
+    // 未确认的提议会随这条新消息作废，先在本地同步状态
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.proposals?.length
+          ? { ...m, proposals: m.proposals.map((p) => (p.status === 'pending' ? { ...p, status: 'expired' } : p)) }
+          : m
+      )
+    )
     setInput('')
 
     try {
@@ -269,6 +278,11 @@ export function ChatPage() {
               ))
             )}
           </div>
+
+          <button type="button" className="chat-memory-link" onClick={() => navigate('/settings?tab=memory')}>
+            <span>长期记忆</span>
+            <span aria-hidden>→</span>
+          </button>
         </aside>
 
         <main className="chat-window">
@@ -350,7 +364,7 @@ function Bubble({ message }: { message: ChatMessage }) {
   )
 }
 
-const KIND_LABEL: Record<ChatProposal['kind'], string> = { fact: '记忆', tag: '标签', report: '报告' }
+const KIND_LABEL: Record<ChatProposal['kind'], string> = { fact: '记忆', tag: '标签', report: '报告', record: '记录' }
 const TAG_TYPE_LABEL: Record<string, string> = {
   insight: '洞察',
   suggestion: '建议',
@@ -359,10 +373,14 @@ const TAG_TYPE_LABEL: Record<string, string> = {
 }
 
 function proposalText(item: ChatProposal) {
-  const p = item.payload
+  const p = item.finalPayload || item.payload
   if (item.kind === 'report') {
     const range = p?.start && p?.end ? `${p.start} ~ ${p.end}` : p?.periodType === 'month' ? '本月' : '本周'
     return `生成一份单人报告（${range}）`
+  }
+  if (item.kind === 'record') {
+    const score = p?.score != null ? `${p.score} 分` : ''
+    return `${p?.day || ''} ${score} ${p?.note || ''}`.trim()
   }
   return p?.content || ''
 }
@@ -370,18 +388,24 @@ function proposalText(item: ChatProposal) {
 function ProposalCard({ proposal }: { proposal: ChatProposal }) {
   const [item, setItem] = useState(proposal)
   const [visible, setVisible] = useState(proposal.coupleVisible)
+  const [draft, setDraft] = useState((proposal.finalPayload || proposal.payload)?.content || '')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
   const navigate = useNavigate()
   const pending = item.status === 'pending'
-  const p = item.payload
+  const p = item.finalPayload || item.payload
+  const editable = pending && (item.kind === 'fact' || item.kind === 'tag')
 
   async function accept() {
     if (busy) return
+    if (editable && !draft.trim()) {
+      setNote('内容不能为空')
+      return
+    }
     setBusy(true)
     setNote(null)
     try {
-      const res = await api.acceptProposal(item.id, visible)
+      const res = await api.acceptProposal(item.id, visible, editable ? { content: draft.trim() } : undefined)
       setItem(res.proposal)
       if (res.action) {
         setNote('正在生成报告…')
@@ -428,8 +452,18 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
           </span>
         )}
       </div>
-      <p className="chat-proposal-body">{proposalText(item)}</p>
-      {pending && item.kind !== 'report' && (
+      {editable ? (
+        <textarea
+          className="chat-proposal-edit"
+          value={draft}
+          maxLength={500}
+          rows={2}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+      ) : (
+        <p className="chat-proposal-body">{proposalText(item)}</p>
+      )}
+      {pending && (item.kind === 'fact' || item.kind === 'tag') && (
         <label className="chat-proposal-toggle">
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
           对另一半可见
@@ -449,8 +483,10 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
           {item.status === 'accepted'
             ? item.kind === 'report'
               ? '已采纳'
-              : `已保存（${item.coupleVisible ? '对另一半可见' : '仅自己可见'}）`
-            : '已忽略'}
+              : `已保存（${item.coupleVisible ? '对另一半可见' : '仅自己可见'}${item.edited ? ' · 已修改' : ''}）`
+            : item.status === 'expired'
+              ? '已作废（你继续了新对话）'
+              : '已忽略'}
         </span>
       )}
       {note && <span className="chat-proposal-note">{note}</span>}

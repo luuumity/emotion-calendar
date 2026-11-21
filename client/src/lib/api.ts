@@ -24,6 +24,18 @@ export type RecordTag = {
   createdAt: string
 }
 
+export type Fact = {
+  id: number
+  content: string
+  confidence: number
+  source: 'user' | 'agent_extracted' | 'report_derived'
+  sourceRefId?: number | null
+  coupleVisible: boolean
+  pinned: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 export type ShareViewer = {
   id: number
   displayName: string
@@ -112,8 +124,8 @@ export type ChatSession = {
 
 export type ChatProposal = {
   id: number
-  kind: 'fact' | 'tag' | 'report'
-  status: 'pending' | 'accepted' | 'rejected'
+  kind: 'fact' | 'tag' | 'report' | 'record'
+  status: 'pending' | 'accepted' | 'rejected' | 'expired'
   payload: {
     content?: string
     confidence?: number
@@ -123,7 +135,12 @@ export type ChatProposal = {
     periodType?: 'week' | 'month'
     start?: string | null
     end?: string | null
+    day?: string
+    score?: number
+    note?: string
   } | null
+  finalPayload?: ChatProposal['payload'] | null
+  edited?: boolean
   coupleVisible: boolean
   resultRefId?: number | null
   createdAt: string
@@ -208,6 +225,16 @@ export const api = {
     }),
   deleteTag: (id: number) => request<{ ok: true }>(`/tags/${id}`, { method: 'DELETE' }),
 
+  // ---- facts ----
+  facts: () => request<{ facts: Fact[] }>('/facts'),
+  createFact: (body: { content: string; confidence?: number; coupleVisible?: boolean; pinned?: boolean }) =>
+    request<{ fact: Fact }>('/facts', { method: 'POST', body: JSON.stringify(body) }),
+  updateFact: (
+    id: number,
+    patch: { content?: string; confidence?: number; coupleVisible?: boolean; pinned?: boolean }
+  ) => request<{ fact: Fact }>(`/facts/${id}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteFact: (id: number) => request<{ ok: true }>(`/facts/${id}`, { method: 'DELETE' }),
+
   // ---- insights ----
   insights: () => request<{ insights: Insight[] }>('/insights'),
   insight: (id: number) => request<{ insight: Insight }>(`/insights/${id}`),
@@ -241,11 +268,14 @@ export const api = {
     ),
 
   // ---- agent 写入提议 ----
-  acceptProposal: (id: number, coupleVisible = false) =>
+  acceptProposal: (id: number, coupleVisible = false, payload?: ChatProposal['payload']) =>
     request<{
       proposal: ChatProposal
       action?: { type: string; scope: string; periodType: 'week' | 'month'; start?: string | null; end?: string | null }
-    }>(`/proposals/${id}/accept`, { method: 'POST', body: JSON.stringify({ coupleVisible }) }),
+    }>(`/proposals/${id}/accept`, {
+      method: 'POST',
+      body: JSON.stringify(payload ? { coupleVisible, payload } : { coupleVisible })
+    }),
   rejectProposal: (id: number) =>
     request<{ proposal: ChatProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
 }

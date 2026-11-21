@@ -2323,6 +2323,7 @@ p {
 
 .settings-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
   margin-bottom: 20px;
@@ -2428,6 +2429,139 @@ p {
   margin: 14px 0 0;
   font-size: 13px;
   color: var(--sage);
+}
+
+/* ---- 长期记忆 ---- */
+
+.memory-add {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.memory-add input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.memory-add input:focus {
+  outline: none;
+  border-color: var(--coral);
+}
+
+.memory-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: grid;
+  gap: 10px;
+}
+
+.memory-item {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.memory-item.pinned {
+  border-color: rgba(242, 112, 95, 0.35);
+}
+
+.memory-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.memory-source {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-deep);
+  color: var(--ink-soft);
+}
+
+.memory-source.agent_extracted {
+  background: var(--coral-soft);
+  color: var(--coral-deep);
+}
+
+.memory-source.report_derived {
+  background: var(--sage-soft);
+  color: var(--sage);
+}
+
+.memory-pin {
+  font-size: 11px;
+  color: var(--coral-deep);
+}
+
+.memory-date {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.memory-content {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-edit {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.memory-edit:focus {
+  outline: none;
+  border-color: var(--coral);
+}
+
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.memory-actions .ghost-btn.small.danger {
+  color: var(--coral-deep);
+}
+
+.memory-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.memory-item .banner.error {
+  margin-top: 8px;
 }
 
 @media (max-width: 520px) {
@@ -2942,6 +3076,32 @@ p {
   opacity: 0.6;
 }
 
+.chat-proposal.expired {
+  opacity: 0.55;
+}
+
+.chat-proposal.expired .chat-proposal-status {
+  color: var(--ink-faint);
+}
+
+.chat-proposal-edit {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.chat-proposal-edit:focus {
+  outline: none;
+  border-color: var(--coral);
+}
+
 .chat-proposal-head {
   display: flex;
   align-items: center;
@@ -3003,6 +3163,27 @@ p {
   margin-top: 6px;
   font-size: 12px;
   color: var(--ink-faint);
+}
+
+.chat-memory-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-memory-link:hover {
+  background: rgba(47, 42, 37, 0.05);
+  color: var(--ink);
 }
 
 .chat-dot {
