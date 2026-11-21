@@ -3249,11 +3249,61 @@ p {
 
 .chat-input-area {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding: 18px 22px;
   border-top: 1px dashed var(--line);
   background: transparent;
+}
+
+.chat-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.chat-link-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-link-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fbf8f1;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+a.chat-link-chip:hover {
+  border-color: rgba(242, 112, 95, 0.55);
+}
+
+.chat-link-chip-domain {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-link-chip-path {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--ink-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-link-chip-more {
+  color: var(--ink-soft);
+  cursor: default;
 }
 
 .chat-input {

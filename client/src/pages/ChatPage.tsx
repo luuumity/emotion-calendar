@@ -12,6 +12,60 @@ function formatTime(iso: string) {
   })
 }
 
+const URL_RE = /https?:\/\/[^\s<>"'，。；：！？、（）【】《》「」『』“”‘’]+/gi
+const TRAILING_PUNCT = '.,;:!?，。；：！？、\'"”’】》」』'
+
+type LinkChip = { url: string; domain: string; path: string }
+
+/** 去掉误粘进来的句末标点，同时保留配对括号内的合法 URL */
+function trimUrlTail(raw: string) {
+  let s = raw
+  for (;;) {
+    const ch = s.slice(-1)
+    if (!ch) break
+    if (TRAILING_PUNCT.includes(ch)) {
+      s = s.slice(0, -1)
+      continue
+    }
+    if (ch === ')' && !s.includes('(')) {
+      s = s.slice(0, -1)
+      continue
+    }
+    if (ch === ']' && !s.includes('[')) {
+      s = s.slice(0, -1)
+      continue
+    }
+    break
+  }
+  return s
+}
+
+/** 纯本地解析，不联网、不经过模型；只用于输入框下方的可视化 */
+function extractLinks(text: string): LinkChip[] {
+  const seen = new Set<string>()
+  const out: LinkChip[] = []
+  for (const raw of text.match(URL_RE) || []) {
+    let url: URL
+    try {
+      url = new URL(trimUrlTail(raw))
+    } catch {
+      continue
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue
+    if (seen.has(url.href)) continue
+    seen.add(url.href)
+    const pathname = url.pathname === '/' ? '' : url.pathname
+    let path = pathname + url.search
+    try {
+      path = decodeURI(path)
+    } catch {
+      // 非法百分号编码时保留原样
+    }
+    out.push({ url: url.href, domain: url.hostname.replace(/^www\./, ''), path })
+  }
+  return out
+}
+
 export function ChatPage() {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -27,6 +81,8 @@ export function ChatPage() {
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hintTimer = useRef<number | null>(null)
+
+  const links = useMemo(() => extractLinks(input), [input])
 
   function flashHint(message: string) {
     setHint(message)
@@ -316,23 +372,53 @@ export function ChatPage() {
               </div>
 
               <footer className="chat-input-area">
-                <textarea
-                  ref={inputRef}
-                  className="chat-input"
-                  rows={1}
-                  placeholder="说点什么…"
-                  value={input}
-                  disabled={sending}
-                  onChange={(e) => setInput(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={send}
-                  disabled={sending || !input.trim()}
-                >
-                  {sending ? '…' : '发送'}
-                </button>
+                {links.length > 0 && (
+                  <div className="chat-link-chips" aria-label="已识别的链接">
+                    {links.slice(0, 3).map((link) => (
+                      <a
+                        key={link.url}
+                        className="chat-link-chip"
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        title={link.url}
+                      >
+                        <span className="chat-link-chip-domain">{link.domain}</span>
+                        {link.path && <span className="chat-link-chip-path">{link.path}</span>}
+                      </a>
+                    ))}
+                    {links.length > 3 && (
+                      <span
+                        className="chat-link-chip chat-link-chip-more"
+                        title={links
+                          .slice(3)
+                          .map((link) => link.url)
+                          .join('\n')}
+                      >
+                        +{links.length - 3}
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="chat-input-row">
+                  <textarea
+                    ref={inputRef}
+                    className="chat-input"
+                    rows={1}
+                    placeholder="说点什么…"
+                    value={input}
+                    disabled={sending}
+                    onChange={(e) => setInput(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    onClick={send}
+                    disabled={sending || !input.trim()}
+                  >
+                    {sending ? '…' : '发送'}
+                  </button>
+                </div>
               </footer>
             </>
           )}
