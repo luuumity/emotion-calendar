@@ -1,6 +1,29 @@
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useAuth } from '../context/AuthContext'
+
+const TAB_PATHS = ['/', '/insights', '/chat', '/settings'] as const
+
+function tabIndexFor(pathname: string) {
+  if (pathname === '/' || pathname.startsWith('/day/')) return 0
+  if (pathname.startsWith('/insights')) return 1
+  if (pathname.startsWith('/chat')) return 2
+  if (pathname.startsWith('/settings') || pathname.startsWith('/access')) return 3
+  return -1
+}
+
+const SWIPE_IGNORE = [
+  'input',
+  'textarea',
+  'select',
+  '[contenteditable="true"]',
+  '.gacha-stage',
+  '.swatch',
+  '.chat-sidebar-overlay',
+  '.chat-session-list',
+  '[data-no-swipe]'
+].join(',')
 
 export function CapsuleMark({ size = 30 }: { size?: number }) {
   return (
@@ -19,10 +42,102 @@ export function CapsuleMark({ size = 30 }: { size?: number }) {
 export function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
+  const [slideDir, setSlideDir] = useState<'from-left' | 'from-right' | null>(null)
+  const pendingSwipe = useRef<-1 | 0 | 1>(0)
+  const slideTimer = useRef<number | null>(null)
+
   const hideChatFab =
     location.pathname.startsWith('/chat') ||
     location.pathname.startsWith('/settings') ||
     location.pathname.startsWith('/access')
+
+  // 滑动切换后，等新页面渲染完再播放入场动画
+  useLayoutEffect(() => {
+    if (!pendingSwipe.current) return
+    const dir = pendingSwipe.current
+    pendingSwipe.current = 0
+    setSlideDir(dir > 0 ? 'from-right' : 'from-left')
+    if (slideTimer.current) window.clearTimeout(slideTimer.current)
+    slideTimer.current = window.setTimeout(() => {
+      setSlideDir(null)
+      slideTimer.current = null
+    }, 260)
+  }, [location.pathname])
+
+  useEffect(() => {
+    return () => {
+      if (slideTimer.current) window.clearTimeout(slideTimer.current)
+    }
+  }, [])
+
+  // 左右滑动切换顶部选项卡
+  useEffect(() => {
+    let startX = 0
+    let startY = 0
+    let startAt = 0
+    let tracking = false
+
+    const shouldIgnore = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null
+      if (!el) return true
+      if (el.closest(SWIPE_IGNORE)) return true
+      let node: HTMLElement | null = el
+      while (node) {
+        const style = window.getComputedStyle(node)
+        if (
+          (style.overflowX === 'auto' || style.overflowX === 'scroll') &&
+          node.scrollWidth > node.clientWidth + 4
+        ) {
+          return true
+        }
+        node = node.parentElement
+      }
+      return false
+    }
+
+    const onStart = (event: TouchEvent) => {
+      if (event.touches.length !== 1 || shouldIgnore(event.target)) {
+        tracking = false
+        return
+      }
+      startX = event.touches[0].clientX
+      startY = event.touches[0].clientY
+      startAt = Date.now()
+      tracking = true
+    }
+
+    const onEnd = (event: TouchEvent) => {
+      if (!tracking) return
+      tracking = false
+      const touch = event.changedTouches[0]
+      const dx = touch.clientX - startX
+      const dy = touch.clientY - startY
+      if (Date.now() - startAt > 800) return
+      if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.4) return
+
+      const index = tabIndexFor(location.pathname)
+      const next = index + (dx < 0 ? 1 : -1)
+      if (index < 0 || next < 0 || next >= TAB_PATHS.length) return
+
+      event.preventDefault()
+      pendingSwipe.current = dx < 0 ? 1 : -1
+      navigate(TAB_PATHS[next])
+    }
+
+    const onCancel = () => {
+      tracking = false
+    }
+
+    window.addEventListener('touchstart', onStart, { passive: true })
+    window.addEventListener('touchend', onEnd, { passive: false })
+    window.addEventListener('touchcancel', onCancel, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', onStart)
+      window.removeEventListener('touchend', onEnd)
+      window.removeEventListener('touchcancel', onCancel)
+    }
+  }, [location.pathname, navigate])
 
   return (
     <div className="app-shell">
@@ -61,7 +176,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
 
-      <main className="app-main">{children}</main>
+      <main className={'app-main' + (slideDir ? ` slide-${slideDir}` : '')}>{children}</main>
 
       <footer className="app-footer">
         <span>每一天的感受，都值得被认真收好。</span>
