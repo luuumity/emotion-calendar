@@ -248,9 +248,9 @@ export function InsightsPage() {
 
   function autoNextText(info: { weekly: boolean; monthly: boolean }) {
     const parts: string[] = []
-    if (info.weekly) parts.push('周一 03:00')
+    if (info.weekly) parts.push('每周一 03:00')
     if (info.monthly) parts.push('每月 1 日 03:00')
-    return parts.length ? `下次：${parts.join(' · ')}` : '未开启'
+    return parts.length ? parts.join(' · ') : '未开启'
   }
 
   async function handleDelete(insight: Insight) {
@@ -295,6 +295,7 @@ export function InsightsPage() {
             <strong>开启定时报告？</strong>
             <p>
               周报每周一 03:00 后生成上一完整周；月报每月 1 日 03:00 后生成上一完整月。可以只开一个，也可以都开。
+              开启后会先补最近一个完整周期。
             </p>
             <div className="insight-auto-choices">
               <button
