@@ -2715,11 +2715,23 @@ p {
   }
 }
 
+.insight-auto-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.insight-auto-choices .chip {
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
 .insight-auto-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px 12px;
   padding: 10px 14px;
   margin-bottom: 16px;
   background: var(--card);
@@ -2728,31 +2740,28 @@ p {
   font-size: 13px;
 }
 
-.insight-auto-bar span {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
 .insight-auto-bar strong {
   font-size: 13px;
 }
 
 .insight-auto-bar small {
+  margin-left: auto;
   color: var(--ink-soft);
   font-size: 12px;
 }
 
-.insight-auto-bar button {
-  flex: none;
+@media (max-width: 520px) {
+  .insight-auto-bar small {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
-@media (max-width: 520px) {
-  .insight-auto-bar span {
-    flex-direction: column;
-    gap: 2px;
-  }
+.insights-section-label {
+  margin: 0 0 8px 2px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
 }
 
 .insights-tabs {

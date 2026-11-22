@@ -123,7 +123,8 @@ export function InsightsPage() {
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [coldStartConfirm, setColdStartConfirm] = useState(false)
-  const [autoInfo, setAutoInfo] = useState<{ enabled: boolean; asked: boolean } | null>(null)
+  const [autoInfo, setAutoInfo] = useState<{ weekly: boolean; monthly: boolean; asked: boolean } | null>(null)
+  const [autoDraft, setAutoDraft] = useState({ weekly: true, monthly: false })
   const [autoBusy, setAutoBusy] = useState(false)
 
   const [generating, setGenerating] = useState(false)
@@ -233,16 +234,23 @@ export function InsightsPage() {
     })
   }
 
-  async function answerAuto(enabled: boolean) {
+  async function answerAuto(weekly: boolean, monthly: boolean) {
     setAutoBusy(true)
     try {
-      const res = await api.setInsightAuto(enabled)
-      setAutoInfo({ enabled: res.enabled, asked: res.asked })
+      const res = await api.setInsightAuto(weekly, monthly)
+      setAutoInfo({ weekly: res.weekly, monthly: res.monthly, asked: res.asked })
     } catch (e) {
       setError(e instanceof Error ? e.message : '设置失败')
     } finally {
       setAutoBusy(false)
     }
+  }
+
+  function autoNextText(info: { weekly: boolean; monthly: boolean }) {
+    const parts: string[] = []
+    if (info.weekly) parts.push('周一 03:00')
+    if (info.monthly) parts.push('每月 1 日 03:00')
+    return parts.length ? `下次：${parts.join(' · ')}` : '未开启'
   }
 
   async function handleDelete(insight: Insight) {
@@ -284,14 +292,37 @@ export function InsightsPage() {
       {autoInfo && !autoInfo.asked && (
         <div className="insight-auto-ask">
           <div>
-            <strong>开启每周自动报告？</strong>
-            <p>每周一 03:00 后，自动为上一完整周生成一份单人报告；该周少于 3 条记录时跳过。</p>
+            <strong>开启定时报告？</strong>
+            <p>
+              周报每周一 03:00 后生成上一完整周；月报每月 1 日 03:00 后生成上一完整月。可以只开一个，也可以都开。
+            </p>
+            <div className="insight-auto-choices">
+              <button
+                type="button"
+                className={'chip' + (autoDraft.weekly ? ' active' : '')}
+                onClick={() => setAutoDraft((v) => ({ ...v, weekly: !v.weekly }))}
+              >
+                周报
+              </button>
+              <button
+                type="button"
+                className={'chip' + (autoDraft.monthly ? ' active' : '')}
+                onClick={() => setAutoDraft((v) => ({ ...v, monthly: !v.monthly }))}
+              >
+                月报
+              </button>
+            </div>
           </div>
           <div className="insight-auto-actions">
-            <button type="button" className="primary-btn small" disabled={autoBusy} onClick={() => answerAuto(true)}>
-              开启
+            <button
+              type="button"
+              className="primary-btn small"
+              disabled={autoBusy || (!autoDraft.weekly && !autoDraft.monthly)}
+              onClick={() => answerAuto(autoDraft.weekly, autoDraft.monthly)}
+            >
+              {autoBusy ? '保存中…' : '保存'}
             </button>
-            <button type="button" className="ghost-btn small" disabled={autoBusy} onClick={() => answerAuto(false)}>
+            <button type="button" className="ghost-btn small" disabled={autoBusy} onClick={() => answerAuto(false, false)}>
               暂不
             </button>
           </div>
@@ -300,18 +331,26 @@ export function InsightsPage() {
 
       {autoInfo && autoInfo.asked && (
         <div className="insight-auto-bar">
-          <span>
-            <strong>每周自动报告</strong>
-            <small>{autoInfo.enabled ? '已开启 · 每周一生成上一完整周' : '未开启'}</small>
-          </span>
-          <button
-            type="button"
-            className={autoInfo.enabled ? 'ghost-btn small danger' : 'ghost-btn small'}
-            disabled={autoBusy}
-            onClick={() => answerAuto(!autoInfo.enabled)}
-          >
-            {autoBusy ? '保存中…' : autoInfo.enabled ? '关闭' : '开启'}
-          </button>
+          <strong>定时订阅</strong>
+          <div className="insight-auto-choices">
+            <button
+              type="button"
+              className={'chip' + (autoInfo.weekly ? ' active' : '')}
+              disabled={autoBusy}
+              onClick={() => answerAuto(!autoInfo.weekly, autoInfo.monthly)}
+            >
+              周报
+            </button>
+            <button
+              type="button"
+              className={'chip' + (autoInfo.monthly ? ' active' : '')}
+              disabled={autoBusy}
+              onClick={() => answerAuto(autoInfo.weekly, !autoInfo.monthly)}
+            >
+              月报
+            </button>
+          </div>
+          <small>{autoNextText(autoInfo)}</small>
         </div>
       )}
 
@@ -338,6 +377,7 @@ export function InsightsPage() {
 
       {tab === 'single' && (
         <section className="insights-section">
+          <div className="insights-section-label">单次生成</div>
           <div className="insights-actions">
             <div className="insights-actions-main">
               {coldStart?.needed ? (

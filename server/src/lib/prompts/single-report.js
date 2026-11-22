@@ -7,6 +7,7 @@ import { describeRecordScore, buildScoreSummary, buildDailyBands } from '../scor
 
 const NOTE_LIMIT = 200
 const COLD_NOTE_BUDGET = 20000
+const MONTHLY_NOTE_BUDGET = 20000
 const LONG_SPAN_DAYS = 60
 
 const TAG_LABEL = { insight: '洞察', suggestion: '建议', pattern: '模式', correction: '修正' }
@@ -25,15 +26,16 @@ function oneLine(text) {
  * - 每条记录都保留一行（日期、当天第几颗、分值），一条不删
  * - 理由超过 200 字截断并带 #recordId
  * - 冷启动时理由总预算约 20,000 字，从新到旧分配；超出后更早记录只留日期/分值/#id
+ * - 月报同样限制约 20,000 字，避免一个月记录过多时输入膨胀
  * - 标签贴在理由下、全文展示；记录连理由都未展示时，标签也一并省略
  */
-function buildRecordBlock(records, { coldStart }) {
+function buildRecordBlock(records, { coldStart, noteBudget = Number.POSITIVE_INFINITY }) {
   const rows = records.map((r) => ({
     ...r,
     text: oneLine(r.note)
   }))
 
-  let budget = COLD_NOTE_BUDGET
+  let budget = coldStart ? COLD_NOTE_BUDGET : noteBudget
   const display = new Map()
 
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -43,14 +45,10 @@ function buildRecordBlock(records, { coldStart }) {
       continue
     }
     const shown = r.text.slice(0, NOTE_LIMIT)
-    if (coldStart) {
-      if (shown.length > budget) {
-        display.set(r.id, { reason: '', omitted: true, truncated: false })
-      } else {
-        budget -= shown.length
-        display.set(r.id, { reason: shown, omitted: false, truncated: r.text.length > NOTE_LIMIT })
-      }
+    if (shown.length > budget) {
+      display.set(r.id, { reason: '', omitted: true, truncated: false })
     } else {
+      budget -= shown.length
       display.set(r.id, { reason: shown, omitted: false, truncated: r.text.length > NOTE_LIMIT })
     }
   }
@@ -106,15 +104,21 @@ export function buildSingleReportMessages({
   periodEnd,
   records = [],
   coldStart = false,
-  isFirst = false
+  isFirst = false,
+  periodType = 'week'
 }) {
   const span = dayDiff(periodStart, periodEnd)
   const longSpan = span > LONG_SPAN_DAYS
-  const recordBlock = buildRecordBlock(records, { coldStart })
+  const isMonthly = periodType === 'month' && !longSpan
+  const recordBlock = buildRecordBlock(records, {
+    coldStart,
+    noteBudget: isMonthly ? MONTHLY_NOTE_BUDGET : Number.POSITIVE_INFINITY
+  })
 
   const firstNote = isFirst ? '\n这是用户的第一份报告；可以在开头用一句话说明这是从哪里开始记录、到哪里为止。\n' : ''
 
   const spanDays = periodDayCount(periodStart, periodEnd)
+  const periodWord = isMonthly ? '这个月' : spanDays > 8 ? '这段时间' : '这一周'
   const weekHeading = spanDays > 8 ? '这段时间的你' : '这一周的你'
 
   const outline = longSpan
@@ -123,7 +127,14 @@ export function buildSingleReportMessages({
 2. **阶段变化**：按时间把这段时间分成 2-3 个阶段，说明各阶段的共同点和差别
 3. **当前模式**：用户现在最容易反复出现的模式，尽量关联具体理由
 4. **一个具体建议**：给一个现在就能做的小动作，不要空泛`
-    : `结构（用中文，标题加粗，200-400 字）：
+    : isMonthly
+      ? `结构（用中文，标题加粗，400-600 字）：
+1. **这个月的整体走向**：用感受词描述这个月大致落在哪一档、从月初到月末是在变好、变差还是平稳
+2. **按周看阶段**：把这个月分成 2-3 个阶段，说明各阶段的共同点和差别
+3. **反复出现的模式**：这个月里反复出现的情境或想法，尽量关联具体理由
+4. **下个月可以试试**：给一个具体、可操作的小建议
+注意：如果历史报告里已经有这个月的周报，不要逐周复述，只提炼跨周趋势和反复模式。`
+      : `结构（用中文，标题加粗，200-400 字）：
 1. **${weekHeading}**：用感受词描述${spanDays > 8 ? '这段时间' : '这一周'}大致落在哪一档、波动跨度，以及是在变好、变差还是平稳
 2. **什么在影响你**：什么情境下情绪偏低或偏高（用档位词，如「偏凉」「挺开心」；有理由就尽量关联）
 3. **你可能没注意到**：你观察到但用户可能没注意到的一件小事
@@ -142,7 +153,7 @@ ${outline}
 - 情绪强弱优先用七档感受词：很糟、有点低落、偏凉、一般、还不错、挺开心、很幸福
 - 分数不是完全不能用，但只作为辅助：只在引用用户原话、或确需精确对照时出现；不要用分数做段落主线，不要连续罗列数字、区间或百分比
 - 不写平均分、最高分、最低分，改用"多数时候""偶尔""从…到…"这类表达
-- 样本量用"天"和"颗球"，例如"这周有 4 天记录、共 40 颗球"，不要写"40 条记录"
+- 样本量用"天"和"颗球"，例如"${periodWord}有 4 天记录、共 40 颗球"，不要写"40 条记录"
 - 概览里的天数和球数是准确值，直接使用，不要自己重新统计
 - 同一天有多颗球时，把它们当作具体事件带来的波动，不要用日均分抹平
 - 回读到旧报告、旧标签或历史摘要里的分数时，转成感受词再引用

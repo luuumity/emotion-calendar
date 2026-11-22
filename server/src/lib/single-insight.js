@@ -315,7 +315,8 @@ async function generateSingleInsightSyncInner({
     periodEnd: end,
     records,
     coldStart,
-    isFirst: coldStart
+    isFirst: coldStart,
+    periodType: resolvedType
   })
 
   // 报告只开放 get_record / get_report 回读；不限制总工具调用次数
@@ -343,7 +344,7 @@ async function generateSingleInsightSyncInner({
       `UPDATE insights
        SET content = ?, model = ?, prompt_version = ?, origin = ?, kind = ?, tokens = ?, generated_at = ?
        WHERE id = ?`
-    ).run(result.content, result.model, 'single-v3', origin, kind, result.usage.total_tokens || 0, now, existing.id)
+    ).run(result.content, result.model, 'single-v4', origin, kind, result.usage.total_tokens || 0, now, existing.id)
     const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(existing.id)
     return {
       insight: view(row),
@@ -363,7 +364,7 @@ async function generateSingleInsightSyncInner({
         (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens, generated_at)
        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v3', origin, kind, result.usage.total_tokens || 0, now)
+    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v4', origin, kind, result.usage.total_tokens || 0, now)
 
   const row = findExistingSingleInsight(userId, resolvedType, start, end)
   return {

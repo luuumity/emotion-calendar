@@ -60,17 +60,29 @@ router.get('/', (req, res) => {
   })
 })
 
-// 自动周报开关：三态（NULL 未询问 / 0 关 / 1 开）
+// 自动报告开关：周报/月报独立，未询问时均为 NULL/关闭
 router.get('/auto', (req, res) => {
-  const row = db.prepare('SELECT auto_insight_enabled FROM users WHERE id = ?').get(req.user.id)
-  const value = row?.auto_insight_enabled
-  res.json({ enabled: value === 1, asked: value !== null && value !== undefined })
+  const row = db
+    .prepare('SELECT auto_insight_enabled, auto_insight_monthly FROM users WHERE id = ?')
+    .get(req.user.id)
+  const weeklyValue = row?.auto_insight_enabled
+  const monthlyValue = row?.auto_insight_monthly
+  res.json({
+    weekly: weeklyValue === 1,
+    monthly: monthlyValue === 1,
+    asked: weeklyValue !== null && weeklyValue !== undefined
+  })
 })
 
 router.post('/auto', (req, res) => {
-  const enabled = req.body?.enabled ? 1 : 0
-  db.prepare('UPDATE users SET auto_insight_enabled = ? WHERE id = ?').run(enabled, req.user.id)
-  res.json({ ok: true, enabled: !!enabled, asked: true })
+  const weekly = req.body?.weekly ? 1 : 0
+  const monthly = req.body?.monthly ? 1 : 0
+  db.prepare('UPDATE users SET auto_insight_enabled = ?, auto_insight_monthly = ? WHERE id = ?').run(
+    weekly,
+    monthly,
+    req.user.id
+  )
+  res.json({ ok: true, weekly: !!weekly, monthly: !!monthly, asked: true })
 })
 
 // 单条详情（权限硬校验）

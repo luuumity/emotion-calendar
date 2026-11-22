@@ -380,6 +380,18 @@ const migrations = [
         UPDATE insights SET kind = 'custom' WHERE scope = 'couple';
       `)
     }
+  },
+  {
+    version: 15,
+    // 定时月报：独立开关与失败重试记账；已有用户默认月报关闭
+    up() {
+      db.exec(`
+        ALTER TABLE users ADD COLUMN auto_insight_monthly INTEGER;
+        ALTER TABLE users ADD COLUMN auto_insight_fail_key_monthly TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN auto_insight_fail_count_monthly INTEGER NOT NULL DEFAULT 0;
+        UPDATE users SET auto_insight_monthly = 0 WHERE auto_insight_enabled IS NOT NULL;
+      `)
+    }
   }
 ]
 
