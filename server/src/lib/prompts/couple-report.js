@@ -1,5 +1,18 @@
-// 阶段一双人报告 prompt 模板
+// 阶段一双人报告 prompt 模板 v2
 // 输入：A 和 B 两个 persona 块（已按对方授权裁剪过）+ 周期内记录（各自的 + 对方可见的）+ 上次增量 summary
+// 语言约定与单人报告一致：情绪强弱优先用七档感受词，分数只作为括号内的辅助信息。
+
+import { describeRecordScore, buildScoreSummary } from '../score-labels.js'
+
+function recordLine(record) {
+  return `  - ${record.day}: ${describeRecordScore(record.score, record.originalScore)}${record.note !== undefined ? `; 理由: ${record.note}` : ''}`
+}
+
+function summaryLine(name, records) {
+  const summary = buildScoreSummary(records)
+  if (!summary.balls) return `${name}：本周期没有记录`
+  return `${name}：覆盖 ${summary.days} 天，共 ${summary.balls} 颗球；档位分布：${summary.distributionText}；整体跨度：${summary.rangeText}`
+}
 
 export function buildCoupleReportMessages({
   personaA,
@@ -12,13 +25,9 @@ export function buildCoupleReportMessages({
   periodEnd,
   lastSummary = ''
 }) {
-  const aBlock = recordsA.length
-    ? recordsA.map((r) => `  - ${r.day}: 分数 ${r.score}${r.note !== undefined ? `; 理由: ${r.note}` : ''}${r.originalScore !== null && r.originalScore !== undefined ? `（原始分 ${r.originalScore}）` : ''}`).join('\n')
-    : '（本周期无记录）'
+  const aBlock = recordsA.length ? recordsA.map(recordLine).join('\n') : '（本周期无记录）'
 
-  const bBlock = recordsB.length
-    ? recordsB.map((r) => `  - ${r.day}: 分数 ${r.score}${r.note !== undefined ? `; 理由: ${r.note}` : ''}${r.originalScore !== null && r.originalScore !== undefined ? `（原始分 ${r.originalScore}）` : ''}`).join('\n')
-    : '（本周期无记录）'
+  const bBlock = recordsB.length ? recordsB.map(recordLine).join('\n') : '（本周期无记录）'
 
   const system = `${personaA}
 
@@ -31,14 +40,17 @@ ${partnerAName} 和 ${partnerBName} 是一对情侣。你们有互相授权的�
 ${lastSummary ? `===== 上次分析的压缩记忆 =====\n${lastSummary}\n` : ''}
 ===== 任务 =====
 为这对情侣生成一份双人情绪报告。结构（中文，200-500 字）：
-1. **这段时间的合拍程度**：在同一时间段里分数高低的相关性（比如"都在周三低谷"或"方向常常相反"）
+1. **这段时间的合拍程度**：同一时段两人的情绪档位是否同向（都偏低、都挺开心），还是一高一低；不要用分数做相关性描述
 2. **可能的共振或错位**：有没有某件事（从理由里看）让双方同时情绪受影响？
-3. **需要注意的信号**：有没有沟通回避、或一方长期单方面低/高分的模式？
+3. **需要注意的信号**：有没有沟通回避、或一方长期单方面偏低/偏高的模式？
 4. **温和的提议**：一件具体的、可以一起做的小事（不要空泛）
 
 要求：
 - 不指责任何一方，不做"谁对谁错"的判断
-- 如果某个数据是 colors 档授权（你看到分数但看不到理由），坦诚说"仅从分数看 ${partnerAName} 在 X 日偏低，不清楚原因"
+- 情绪强弱优先用七档感受词：很糟、有点低落、偏凉、一般、还不错、挺开心、很幸福
+- 分数不是完全不能用，但只作为辅助：只在引用原话、或确需精确对照时出现；不要连续罗列数字、区间或百分比
+- 不写平均分、最高分、最低分，改用"多数时候""偶尔""从…到…"这类表达
+- 如果某个数据是 colors 档授权（你只能看到档位/颜色，看不到理由），坦诚说"仅从感受档看 ${partnerAName} 在 X 日偏凉，不清楚原因"
 - 承认局限：你们只能看到双方写下来的，无法知道没写的
 - 理由中可能包含链接：读到内容就结合内容分析，读不到就只依据记录里写下的理由，不要编造链接内容`
 
@@ -46,7 +58,11 @@ ${lastSummary ? `===== 上次分析的压缩记忆 =====\n${lastSummary}\n` : ''
     { role: 'system', content: system },
     {
       role: 'user',
-      content: `===== ${periodStart} ~ ${periodEnd} ${partnerAName} 的记录 =====\n${aBlock}\n\n===== ${periodStart} ~ ${periodEnd} ${partnerBName} 的记录 =====\n${bBlock}`
+      content: `===== 本周期概览 =====
+${summaryLine(partnerAName, recordsA)}
+${summaryLine(partnerBName, recordsB)}
+
+===== ${periodStart} ~ ${periodEnd} ${partnerAName} 的记录 =====\n${aBlock}\n\n===== ${periodStart} ~ ${periodEnd} ${partnerBName} 的记录 =====\n${bBlock}`
     }
   ]
 }
@@ -64,7 +80,7 @@ export function buildCoupleMemoryMessages({
   recordsA = [],
   recordsB = []
 }) {
-  const line = (r) => `  - ${r.day}: 分数 ${r.score}${r.note ? `; 理由: ${r.note}` : ''}`
+  const line = (r) => `  - ${r.day}: ${describeRecordScore(r.score, r.originalScore)}${r.note ? `; 理由: ${r.note}` : ''}`
   const aBlock = recordsA.length ? recordsA.map(line).join('\n') : '（无记录）'
   const bBlock = recordsB.length ? recordsB.map(line).join('\n') : '（无记录）'
 
@@ -77,6 +93,7 @@ export function buildCoupleMemoryMessages({
       role: 'user',
       content: `把下面这段情侣记忆整理成不超过 300 字的摘要。
 保留：具体事件、情绪转折、关系变化、已经确认过的结论、尚未解决的事。
+情绪强弱优先用档位词（很糟、有点低落、偏凉、一般、还不错、挺开心、很幸福）描述，分数只在确需精确对照时保留。
 不要写分数统计表，不要写建议。
 
 ${lastSummary ? `【已有记忆】\n${lastSummary}\n\n` : ''}【本期记录 ${periodStart} ~ ${periodEnd}】

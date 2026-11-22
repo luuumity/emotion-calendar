@@ -306,7 +306,7 @@ export async function generateSingleInsightSync({
       `UPDATE insights
        SET content = ?, model = ?, prompt_version = ?, tokens = ?, generated_at = ?
        WHERE id = ?`
-    ).run(result.content, result.model, 'single-v2', result.usage.total_tokens || 0, now, existing.id)
+    ).run(result.content, result.model, 'single-v3', result.usage.total_tokens || 0, now, existing.id)
     const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(existing.id)
     return {
       insight: view(row),
@@ -326,7 +326,7 @@ export async function generateSingleInsightSync({
         (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, tokens, generated_at)
        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v2', result.usage.total_tokens || 0, now)
+    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v3', result.usage.total_tokens || 0, now)
 
   const row = findExistingSingleInsight(userId, resolvedType, start, end)
   return {

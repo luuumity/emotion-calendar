@@ -267,7 +267,7 @@ router.post('/couple/generate', async (req, res) => {
     db.prepare(
       `INSERT OR IGNORE INTO insights
         (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, tokens, covered_until, generated_at)
-       VALUES (?, NULL, ?, 'manual', ?, ?, ?, ?, 'couple-v1', ?, ?, ?)`
+       VALUES (?, NULL, ?, 'manual', ?, ?, ?, ?, 'couple-v2', ?, ?, ?)`
     ).run(
       'couple', coupleKey,
       analysisStart,

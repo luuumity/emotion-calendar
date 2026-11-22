@@ -2,6 +2,7 @@
 // 约定：返回值永远是合法 JSON；超过 MAX_RESULT_CHARS 时不返回半截数据，而是返回提示让模型缩小范围
 
 import { db } from '../db.js'
+import { scoreLabel } from './score-labels.js'
 
 const MAX_RESULT_CHARS = 6000   // 单次结果字符上限（约 4000 token）
 const MAX_SPAN_DAYS = 90        // 明细类查询的时间跨度上限
@@ -141,7 +142,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'get_record',
       description:
-        '读取某一条记录的完整内容（含未截断的理由，indexInDay 表示当天第几颗）。当输入里某条理由被截断、或只显示了日期和 #编号时，用这个编号取全文。',
+        '读取某一条记录的完整内容（含未截断的理由，indexInDay 表示当天第几颗）。同时返回情绪档位 label；向用户描述时优先用 label，不要只报分数。当输入里某条理由被截断、或只显示了日期和 #编号时，用这个编号取全文。',
       parameters: {
         type: 'object',
         properties: {
@@ -448,7 +449,14 @@ function getRecord(userId, args) {
   const indexInDay = db
     .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
     .get(userId, r.day, r.id).c
-  const item = { id: r.id, day: r.day, indexInDay, score: r.score, note: String(r.note || '') }
+  const item = {
+    id: r.id,
+    day: r.day,
+    indexInDay,
+    score: r.score,
+    label: scoreLabel(r.score),
+    note: String(r.note || '')
+  }
   if (r.original_score != null) item.originalScore = r.original_score
   if (r.adjusted_at) item.adjustedAt = r.adjusted_at
   const tag = db
