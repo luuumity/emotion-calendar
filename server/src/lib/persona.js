@@ -62,6 +62,7 @@ export function serializePersona(opts) {
     // 输入通常是最新在前，这里归一化并按周期升序，取最后 3 条 = 最新 3 条，按时间顺序展示。
     const recent = singleInsights
       .map((ins) => ({
+        id: ins.id || ins.reportId || null,
         periodStart: ins.periodStart || ins.period_start || '',
         periodEnd: ins.periodEnd || ins.period_end || '',
         summary: ins.summary || ins.content || ''
@@ -74,7 +75,9 @@ export function serializePersona(opts) {
       lines.push(`【${displayName} 过往自我分析摘要】`)
       for (const ins of recent) {
         const period = ins.periodEnd ? `${ins.periodStart} ~ ${ins.periodEnd}` : ins.periodStart
-        lines.push(`- ${period}: ${ins.summary.slice(0, 200) || '(无)'} `)
+        // 超过 200 字才截断并带 #报告编号，可被 get_report 回读
+        const text = ins.summary.length > 200 ? `${ins.summary.slice(0, 200)} …${ins.id ? ` #${ins.id}` : ''}` : ins.summary
+        lines.push(`- ${period}: ${text || '(无)'} `)
       }
       lines.push(``)
     }

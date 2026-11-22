@@ -140,11 +140,12 @@ export const FUNCTION_TOOLS = [
     type: 'function',
     function: {
       name: 'get_record',
-      description: '读取某一条记录的完整内容（含未截断的理由，indexInDay 表示当天第几颗）。当 get_days 返回 noteTruncated 时用它取全文。',
+      description:
+        '读取某一条记录的完整内容（含未截断的理由，indexInDay 表示当天第几颗）。当输入里某条理由被截断、或只显示了日期和 #编号时，用这个编号取全文。',
       parameters: {
         type: 'object',
         properties: {
-          id: { type: 'integer', description: '记录编号，来自 get_days 返回的 id' }
+          id: { type: 'integer', description: '记录编号，来自输入里的 #编号' }
         },
         required: ['id']
       }
@@ -155,7 +156,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'get_report',
       description:
-        '读取过往 AI 分析报告。不传 id 时返回报告列表（编号、类型、周期、开头摘要），返回 total/returned/nextOffset，可用 limit/offset 翻页；传 id 时返回该报告全文。',
+        '读取过往 AI 分析报告。不传 id 时返回报告列表（编号、类型、周期、开头摘要），返回 total/returned/nextOffset，可用 limit/offset 翻页；传 id 时返回该报告全文。输入里历史报告摘要被截断并带 #编号时，用这个编号取全文。',
       parameters: {
         type: 'object',
         properties: {
@@ -289,6 +290,11 @@ export const FUNCTION_TOOLS = [
     }
   }
 ]
+
+// 报告生成只开放回读具体内容的两个工具
+export const REPORT_FUNCTION_TOOLS = FUNCTION_TOOLS.filter((tool) =>
+  ['get_record', 'get_report'].includes(tool.function?.name)
+)
 
 function getDays(userId, args) {
   const range = rangeArgs(args)
