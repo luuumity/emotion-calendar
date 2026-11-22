@@ -104,10 +104,11 @@ export function LoginPage() {
               <input
                 value={username}
                 autoComplete="username"
-                placeholder="字母、数字或下划线"
+                placeholder="2-20 位中文、字母、数字或下划线"
                 onChange={(event) => setUsername(event.target.value)}
                 required
               />
+              {mode === 'register' && <small className="field-hint">只用于登录，对方不会看到</small>}
             </label>
 
             {mode === 'register' && (
@@ -116,10 +117,11 @@ export function LoginPage() {
                 <input
                   value={displayName}
                   maxLength={20}
-                  placeholder="对方会看到的名字"
+                  placeholder="对方会看到的名字，可用中文"
                   onChange={(event) => setDisplayName(event.target.value)}
                   required
                 />
+                <small className="field-hint">会显示在顶部、报告和对方的页面里</small>
               </label>
             )}
 

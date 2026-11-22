@@ -56,9 +56,15 @@ function formatTime(iso: string) {
   })
 }
 
-function summarize(text: string, n = 200) {
+function summarize(text: string, n = 120) {
   if (!text) return ''
-  const t = text.replace(/\s+/g, ' ').trim()
+  const t = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/\*\*|__|\*|_|`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
   return t.length > n ? t.slice(0, n) + '…' : t
 }
 
@@ -289,6 +295,23 @@ export function InsightsPage() {
               暂不
             </button>
           </div>
+        </div>
+      )}
+
+      {autoInfo && autoInfo.asked && (
+        <div className="insight-auto-bar">
+          <span>
+            <strong>每周自动报告</strong>
+            <small>{autoInfo.enabled ? '已开启 · 每周一生成上一完整周' : '未开启'}</small>
+          </span>
+          <button
+            type="button"
+            className={autoInfo.enabled ? 'ghost-btn small danger' : 'ghost-btn small'}
+            disabled={autoBusy}
+            onClick={() => answerAuto(!autoInfo.enabled)}
+          >
+            {autoBusy ? '保存中…' : autoInfo.enabled ? '关闭' : '开启'}
+          </button>
         </div>
       )}
 
@@ -604,7 +627,7 @@ function InsightCard({
           {deleteErr && <p className="insight-delete-error">{deleteErr}</p>}
         </div>
       ) : (
-        <p className="insight-summary">{summarize(insight.content, 220)}</p>
+        <p className="insight-summary">{summarize(insight.content)}</p>
       )}
     </article>
   )

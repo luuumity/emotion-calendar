@@ -10,8 +10,8 @@ router.post('/register', (req, res) => {
   const password = String(req.body?.password || '')
   const displayName = String(req.body?.displayName || '').trim()
 
-  if (!/^[a-z0-9_]{3,20}$/.test(username)) {
-    return res.status(400).json({ error: '用户名需为 3-20 位字母、数字或下划线' })
+  if (!/^[\p{Script=Han}A-Za-z0-9_]{2,20}$/u.test(username)) {
+    return res.status(400).json({ error: '用户名需为 2-20 位中文、字母、数字或下划线' })
   }
   if (password.length < 6) {
     return res.status(400).json({ error: '密码至少 6 位' })

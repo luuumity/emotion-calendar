@@ -216,75 +216,6 @@ function ReminderPanel() {
   )
 }
 
-function InsightPanel() {
-  const [status, setStatus] = useState<{ enabled: boolean; asked: boolean } | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState('')
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    api
-      .insightAuto()
-      .then((res) => setStatus(res))
-      .catch((err) => setError(errorMessage(err)))
-  }, [])
-
-  async function toggle() {
-    if (!status) return
-    setBusy(true)
-    setError('')
-    setMessage('')
-    try {
-      const res = await api.setInsightAuto(!status.enabled)
-      setStatus({ enabled: res.enabled, asked: res.asked })
-      setMessage(res.enabled ? '已开启每周自动报告' : '已关闭每周自动报告')
-    } catch (err) {
-      setError(errorMessage(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (!status) {
-    return (
-      <div className="card">
-        <p className="field-hint">{error || '正在读取自动报告设置…'}</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="card">
-      <div className="card-head">
-        <h2>每周自动报告</h2>
-        <p>每周一 03:00 后，自动为上一完整周生成一份单人情绪报告。</p>
-      </div>
-
-      <div className="settings-row">
-        <div>
-          <div className="settings-label">自动生成</div>
-          <div className="field-hint">
-            {status.enabled ? '已开启' : status.asked ? '未开启' : '还没选择，默认关闭'}
-            {' · '}该周少于 3 条记录时跳过
-          </div>
-        </div>
-        <button
-          type="button"
-          className={status.enabled ? 'ghost-btn small danger' : 'ghost-btn small'}
-          disabled={busy}
-          onClick={toggle}
-        >
-          {busy ? '保存中…' : status.enabled ? '关闭' : '开启'}
-        </button>
-      </div>
-
-      <p className="settings-note">关闭后停止自动生成，已经生成的报告会保留；手动生成始终可用。</p>
-      {message && <p className="settings-ok">{message}</p>}
-      {error && <p className="form-error">{error}</p>}
-    </div>
-  )
-}
-
 function sourceLabel(source: Fact['source']) {
   if (source === 'agent_extracted') return '对话提取'
   if (source === 'report_derived') return '报告提炼'
@@ -487,14 +418,14 @@ function MemoryPanel() {
 export function SettingsPage() {
   const [params, setParams] = useSearchParams()
   const rawTab = params.get('tab')
-  const tab = rawTab === 'reminder' || rawTab === 'memory' || rawTab === 'insight' ? rawTab : 'access'
+  const tab = rawTab === 'reminder' || rawTab === 'memory' ? rawTab : 'access'
 
   return (
     <div className="page settings-page">
       <section className="page-head">
         <div>
           <h1>设置</h1>
-          <p className="sub">在这里管理谁能看到你的记录、每天几点提醒你、自动报告的节奏，以及 Agent 记住的长期信息。</p>
+          <p className="sub">在这里管理谁能看到你的记录、每天几点提醒你，以及 Agent 记住的长期信息。</p>
         </div>
       </section>
 
@@ -520,15 +451,6 @@ export function SettingsPage() {
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'insight'}
-          className={tab === 'insight' ? 'settings-tab active' : 'settings-tab'}
-          onClick={() => setParams({ tab: 'insight' }, { replace: true })}
-        >
-          AI 报告
-        </button>
-        <button
-          type="button"
-          role="tab"
           aria-selected={tab === 'memory'}
           className={tab === 'memory' ? 'settings-tab active' : 'settings-tab'}
           onClick={() => setParams({ tab: 'memory' }, { replace: true })}
@@ -542,7 +464,7 @@ export function SettingsPage() {
           <AccessPanel />
         ) : (
           <div className="settings-narrow">
-            {tab === 'reminder' ? <ReminderPanel /> : tab === 'insight' ? <InsightPanel /> : <MemoryPanel />}
+            {tab === 'reminder' ? <ReminderPanel /> : <MemoryPanel />}
           </div>
         )}
       </div>
