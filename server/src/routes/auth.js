@@ -8,7 +8,7 @@ const router = Router()
 router.post('/register', (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase()
   const password = String(req.body?.password || '')
-  const displayName = String(req.body?.displayName || '').trim()
+  const displayName = String(req.body?.displayName || '').trim() || username
 
   if (!/^[\p{Script=Han}A-Za-z0-9_]{2,20}$/u.test(username)) {
     return res.status(400).json({ error: '用户名需为 2-20 位中文、字母、数字或下划线' })

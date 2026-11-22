@@ -99,29 +99,34 @@ export function LoginPage() {
           </div>
 
           <form onSubmit={submit} className="auth-form">
+            {mode === 'register' && (
+              <p className="auth-note">
+                用户名用来登录，不能重复；昵称是对方看到、称呼你的名字。昵称可以不填，默认和用户名一样。
+              </p>
+            )}
+
             <label>
-              <span>用户名</span>
+              <span>用户名（登录用）</span>
               <input
                 value={username}
                 autoComplete="username"
-                placeholder="2-20 位中文、字母、数字或下划线"
+                placeholder="2-20 位，例如 xiaoming 或 小明"
+                minLength={2}
+                maxLength={20}
                 onChange={(event) => setUsername(event.target.value)}
                 required
               />
-              {mode === 'register' && <small className="field-hint">只用于登录，对方不会看到</small>}
             </label>
 
             {mode === 'register' && (
               <label>
-                <span>昵称</span>
+                <span>昵称（对方怎么称呼你）</span>
                 <input
                   value={displayName}
                   maxLength={20}
-                  placeholder="对方会看到的名字，可用中文"
+                  placeholder="例如：明明、宝贝；留空就用用户名"
                   onChange={(event) => setDisplayName(event.target.value)}
-                  required
                 />
-                <small className="field-hint">会显示在顶部、报告和对方的页面里</small>
               </label>
             )}
 

@@ -2022,6 +2022,16 @@ p {
   gap: 14px;
 }
 
+.auth-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(111, 154, 120, 0.1);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-soft);
+}
+
 .auth-form label {
   display: grid;
   gap: 6px;
