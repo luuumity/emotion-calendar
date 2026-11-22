@@ -2808,6 +2808,22 @@ p {
   line-height: 1.6;
 }
 
+.insights-coldstart-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  line-height: 1.7;
+}
+
+.insights-coldstart-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .insights-empty {
   text-align: center;
   padding: 36px 22px;

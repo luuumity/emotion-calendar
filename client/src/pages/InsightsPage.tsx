@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type Insight, type AccessInfo, type Granted } from '../lib/api'
+import { api, type Insight, type AccessInfo, type Granted, type ColdStartInfo } from '../lib/api'
 
 type Tab = 'single' | 'couple'
 type PeriodType = 'week' | 'month' | 'manual'
@@ -83,7 +83,9 @@ export function InsightsPage() {
   const [error, setError] = useState<string | null>(null)
   const [insights, setInsights] = useState<Insight[]>([])
   const [access, setAccess] = useState<AccessInfo | null>(null)
+  const [coldStart, setColdStart] = useState<ColdStartInfo | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [coldStartConfirm, setColdStartConfirm] = useState(false)
 
   const [generating, setGenerating] = useState(false)
   const [generateErr, setGenerateErr] = useState<string | null>(null)
@@ -101,6 +103,7 @@ export function InsightsPage() {
     try {
       const [ins, acc] = await Promise.all([api.insights(), api.access()])
       setInsights(ins.insights)
+      setColdStart(ins.coldStart)
       setAccess(acc)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
@@ -120,9 +123,43 @@ export function InsightsPage() {
   const myFull = useMemo(() => (access ? findMyFullViewers(access) : new Map()), [access])
   const grantedFull = useMemo(() => (access ? findGrantedFullOwners(access) : new Map()), [access])
 
-  async function handleGenerateSingle() {
+  async function runGenerateSingle(body: { periodType: PeriodType; start?: string; end?: string }) {
+    setGenerating(true)
     setGenerateErr(null)
     setGenerateSuccess(null)
+    try {
+      const res = await api.generateSingleInsight(body)
+      setGenerateSuccess(
+        res.existing
+          ? '该周期的报告已存在，已为你展开'
+          : res.coldStart
+            ? '首份全量报告已生成'
+            : res.hasKey
+              ? '报告已生成'
+              : 'AI 服务未配置，返回了占位内容'
+      )
+      await load()
+      // 自动展开新生成的
+      setExpandedId(res.insight.id)
+    } catch (e) {
+      setGenerateErr(e instanceof Error ? e.message : '生成失败')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  function handleGenerateSingle() {
+    setGenerateErr(null)
+    setGenerateSuccess(null)
+
+    if (coldStart?.needed) {
+      setColdStartConfirm(true)
+      return
+    }
+    if (coldStart && !coldStart.hasRecords) {
+      setGenerateErr('还没有任何记录，先记录几天再来生成报告')
+      return
+    }
     if (periodType === 'manual') {
       if (!customStart || !customEnd) {
         setGenerateErr('请选择起始和结束日期')
@@ -133,29 +170,23 @@ export function InsightsPage() {
         return
       }
     }
-    setGenerating(true)
-    try {
-      const body: { periodType: PeriodType; start?: string; end?: string } = { periodType }
-      if (periodType === 'manual') {
-        body.start = customStart
-        body.end = customEnd
-      }
-      const res = await api.generateSingleInsight(body)
-      setGenerateSuccess(
-        res.existing
-          ? '该周期的报告已存在，已为你展开'
-          : res.hasKey
-            ? '报告已生成'
-            : 'AI 服务未配置，返回了占位内容'
-      )
-      await load()
-      // 自动展开新生成的
-      setExpandedId(res.insight.id)
-    } catch (e) {
-      setGenerateErr(e instanceof Error ? e.message : '生成失败')
-    } finally {
-      setGenerating(false)
+
+    const body: { periodType: PeriodType; start?: string; end?: string } = { periodType }
+    if (periodType === 'manual') {
+      body.start = customStart
+      body.end = customEnd
     }
+    void runGenerateSingle(body)
+  }
+
+  function confirmColdStart() {
+    if (!coldStart?.start || !coldStart.end) return
+    setColdStartConfirm(false)
+    void runGenerateSingle({
+      periodType: 'manual',
+      start: coldStart.start,
+      end: coldStart.end
+    })
   }
 
   async function handleDelete(insight: Insight) {
@@ -214,68 +245,101 @@ export function InsightsPage() {
         <section className="insights-section">
           <div className="insights-actions">
             <div className="insights-actions-main">
-              <div className="insights-period-tabs">
-                {(
-                  [
-                    ['week', '本周'],
-                    ['month', '本月'],
-                    ['manual', '自定义']
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={'insights-period-tab ' + (periodType === value ? 'active' : '')}
-                    onClick={() => setPeriodType(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              {coldStart?.needed ? (
+                <p className="insights-actions-hint">
+                  这是你的第一份单人报告，会基于从 {coldStart.start} 到 {coldStart.end} 的全部{' '}
+                  {coldStart.recordCount} 条记录生成全量分析。生成之后就可以按本周 / 本月 / 自定义继续。
+                </p>
+              ) : (
+                <>
+                  <div className="insights-period-tabs">
+                    {(
+                      [
+                        ['week', '本周'],
+                        ['month', '本月'],
+                        ['manual', '自定义']
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={'insights-period-tab ' + (periodType === value ? 'active' : '')}
+                        onClick={() => setPeriodType(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
 
-              {periodType === 'manual' && (
-                <div className="insights-custom-range">
-                  <input
-                    type="date"
-                    value={customStart}
-                    max={customEnd || undefined}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                    aria-label="起始日期"
-                  />
-                  <span>至</span>
-                  <input
-                    type="date"
-                    value={customEnd}
-                    min={customStart || undefined}
-                    onChange={(e) => setCustomEnd(e.target.value)}
-                    aria-label="结束日期"
-                  />
-                </div>
+                  {periodType === 'manual' && (
+                    <div className="insights-custom-range">
+                      <input
+                        type="date"
+                        value={customStart}
+                        max={customEnd || undefined}
+                        onChange={(e) => setCustomStart(e.target.value)}
+                        aria-label="起始日期"
+                      />
+                      <span>至</span>
+                      <input
+                        type="date"
+                        value={customEnd}
+                        min={customStart || undefined}
+                        onChange={(e) => setCustomEnd(e.target.value)}
+                        aria-label="结束日期"
+                      />
+                    </div>
+                  )}
+
+                  <p className="insights-actions-hint">
+                    {periodType === 'week'
+                      ? '基于本周（周一～周日）的情绪记录生成一份分析。'
+                      : periodType === 'month'
+                        ? '基于本月（1 号～月末）的情绪记录生成一份分析。'
+                        : '选择一段日期，基于这段时间内的情绪记录生成分析。'}
+                  </p>
+                </>
               )}
-
-              <p className="insights-actions-hint">
-                {periodType === 'week'
-                  ? '基于本周（周一～周日）的情绪记录生成一份分析。'
-                  : periodType === 'month'
-                    ? '基于本月（1 号～月末）的情绪记录生成一份分析。'
-                    : '选择一段日期，基于这段时间内的情绪记录生成分析。'}
-              </p>
             </div>
             <button
               type="button"
               className="primary-btn"
               onClick={handleGenerateSingle}
-              disabled={generating}
+              disabled={generating || (coldStart !== null && !coldStart.hasRecords)}
             >
               {generating
                 ? '生成中…'
-                : periodType === 'week'
-                  ? '生成本周报告'
-                  : periodType === 'month'
-                    ? '生成本月报告'
-                    : '生成自定义报告'}
+                : coldStart?.needed
+                  ? '生成首份全量报告'
+                  : periodType === 'week'
+                    ? '生成本周报告'
+                    : periodType === 'month'
+                      ? '生成本月报告'
+                      : '生成自定义报告'}
             </button>
           </div>
+
+          {coldStartConfirm && coldStart?.needed && (
+            <div className="banner info insights-coldstart-confirm">
+              <div>
+                首份报告会覆盖 {coldStart.start} ~ {coldStart.end} 的全部 {coldStart.recordCount} 条记录，
+                生成后建议再按本周 / 本月继续。
+              </div>
+              <div className="insights-coldstart-actions">
+                <button type="button" className="primary-btn" onClick={confirmColdStart} disabled={generating}>
+                  {generating ? '生成中…' : '确认生成'}
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => setColdStartConfirm(false)}
+                  disabled={generating}
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
 
           {generateErr && <div className="banner error">{generateErr}</div>}
           {generateSuccess && <div className="banner success">{generateSuccess}</div>}
@@ -285,7 +349,13 @@ export function InsightsPage() {
           ) : singleList.length === 0 ? (
             <div className="insights-empty card">
               <h3>还没有单人报告</h3>
-              <p>记录了几天情绪之后，就可以点上面的按钮生成第一份分析啦。</p>
+              <p>
+                {coldStart && !coldStart.hasRecords
+                  ? '还没有任何记录，先投几颗情绪扭蛋，再来生成第一份分析吧。'
+                  : coldStart?.needed
+                    ? '第一份报告会从你最早的记录一路分析到现在，生成后就能按周 / 按月继续了。'
+                    : '记录了几天情绪之后，就可以点上面的按钮生成第一份分析啦。'}
+              </p>
             </div>
           ) : (
             <div className="insight-list">

@@ -299,7 +299,7 @@ async function runWithTools(baseMessages, ctx) {
         output = JSON.stringify({
           ok: false,
           reason: 'duplicate_call',
-          hint: '同样的查询已经执行过，请缩小范围或换一种查法。'
+          hint: '同样的查询已经执行过，请换一个 offset、缩小范围，或换一种查法。'
         })
       } else {
         seen.add(key)

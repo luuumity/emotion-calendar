@@ -89,6 +89,36 @@ function computePeriod(periodType, anchor = new Date()) {
   return { start: a.toISOString().slice(0, 10), end: a.toISOString().slice(0, 10) }
 }
 
+function shanghaiToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10)
+}
+
+/**
+ * 冷启动信息：是否还没有任何单人报告。
+ * 手动和未来的定时任务都通过这里判断，保证口径一致。
+ */
+export function getSingleColdStartInfo(userId) {
+  const stats = db
+    .prepare('SELECT MIN(day) AS first_day, COUNT(*) AS record_count FROM records WHERE user_id = ?')
+    .get(userId)
+  const recordCount = stats?.record_count || 0
+  const hasRecords = recordCount > 0 && Boolean(stats?.first_day)
+  const hasReport = hasRecords
+    ? Boolean(
+        db
+          .prepare('SELECT 1 FROM insights WHERE scope = ? AND user_id = ? LIMIT 1')
+          .get('single', userId)
+      )
+    : false
+  return {
+    hasRecords,
+    needed: hasRecords && !hasReport,
+    start: hasRecords ? stats.first_day : null,
+    end: hasRecords ? shanghaiToday() : null,
+    recordCount
+  }
+}
+
 // ======== 读取 ========
 
 // 列表：自己的单人报告 + 自己参与的双人报告
@@ -102,7 +132,10 @@ router.get('/', (req, res) => {
     .all('couple')
     .filter((row) => isInCouple(row.couple_key, req.user.id))
 
-  res.json({ insights: [...mine, ...couples].sort((a, b) => b.generated_at.localeCompare(a.generated_at)).map(view) })
+  res.json({
+    insights: [...mine, ...couples].sort((a, b) => b.generated_at.localeCompare(a.generated_at)).map(view),
+    coldStart: getSingleColdStartInfo(req.user.id)
+  })
 })
 
 // 单条详情（权限硬校验）
@@ -185,12 +218,37 @@ function findExistingSingleInsight(userId, periodType, start, end) {
 }
 
 async function generateSingleInsightSync({ userId, periodType = 'week', customStart, customEnd }) {
-  const { start, end } = customStart && customEnd ? { start: customStart, end: customEnd } : computePeriod(periodType)
+  const cold = getSingleColdStartInfo(userId)
+  if (!cold.hasRecords) {
+    const err = new Error('还没有任何记录，先记录几天再来生成报告')
+    err.code = 'NO_RECORDS'
+    throw err
+  }
+
+  // 冷启动：还没有任何单人报告时，首份报告永远从第一条记录到今天。
+  // 手动、未来的定时任务都调用本函数，因此共用同一口径。
+  let resolvedType = periodType
+  let start
+  let end
+  let coldStart = false
+  if (cold.needed) {
+    resolvedType = 'manual'
+    start = cold.start
+    end = cold.end
+    coldStart = true
+  } else {
+    const period =
+      customStart && customEnd
+        ? { start: customStart, end: customEnd }
+        : computePeriod(periodType)
+    start = period.start
+    end = period.end
+  }
 
   // 先查重：已存在就直接返回，不再调用模型，避免白花 token、也避免误报“已生成”
-  const existing = findExistingSingleInsight(userId, periodType, start, end)
+  const existing = findExistingSingleInsight(userId, resolvedType, start, end)
   if (existing) {
-    return { insight: view(existing), usage: null, hasKey: hasDeepSeekKey(), existing: true }
+    return { insight: view(existing), usage: null, hasKey: hasDeepSeekKey(), existing: true, coldStart }
   }
 
   const now = new Date().toISOString()
@@ -219,10 +277,16 @@ async function generateSingleInsightSync({ userId, periodType = 'week', customSt
         (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, tokens, generated_at)
        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run('single', userId, periodType, start, end, result.content, result.model, 'single-v1', result.usage.total_tokens || 0, now)
+    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v1', result.usage.total_tokens || 0, now)
 
-  const row = findExistingSingleInsight(userId, periodType, start, end)
-  return { insight: view(row), usage: result.usage, hasKey: hasDeepSeekKey(), existing: info.changes === 0 }
+  const row = findExistingSingleInsight(userId, resolvedType, start, end)
+  return {
+    insight: view(row),
+    usage: result.usage,
+    hasKey: hasDeepSeekKey(),
+    existing: info.changes === 0,
+    coldStart
+  }
 }
 
 // POST /api/insights/single/generate  手动触发单人报告
@@ -253,6 +317,7 @@ router.post('/single/generate', async (req, res) => {
     const result = await generateSingleInsightSync({ userId: req.user.id, periodType: effectiveType, customStart, customEnd })
     res.status(result.existing ? 200 : 201).json(result)
   } catch (err) {
+    if (err.code === 'NO_RECORDS') return res.status(400).json({ error: err.message })
     console.error('[insights] 单人报告生成失败:', err.message)
     res.status(500).json({ error: '生成失败，请稍后再试' })
   }

@@ -4,9 +4,11 @@
 import { db } from '../db.js'
 
 const MAX_RESULT_CHARS = 6000   // 单次结果字符上限（约 4000 token）
-const MAX_SPAN_DAYS = 90        // 单次查询的时间跨度上限
+const MAX_SPAN_DAYS = 90        // 明细类查询的时间跨度上限
+const MAX_STATS_SPAN_DAYS = 1826 // 聚合统计的上限：5 年
 const MAX_ITEMS = 60
 const NOTE_PREVIEW = 200
+const DEFAULT_LIMIT = 20
 
 function isDay(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false
@@ -23,16 +25,74 @@ function dayDiff(a, b) {
   return Math.round(ms / 86400000)
 }
 
-function rangeArgs(args) {
+function rangeArgs(args, maxSpan = MAX_SPAN_DAYS) {
   const start = String(args?.start || '')
   const end = String(args?.end || '')
   if (!isDay(start) || !isDay(end)) return { error: '日期格式应为 YYYY-MM-DD' }
   if (start > end) return { error: '起始日期不能晚于结束日期' }
   const span = dayDiff(start, end)
-  if (span > MAX_SPAN_DAYS) {
-    return { error: `时间跨度为 ${span} 天，超过 ${MAX_SPAN_DAYS} 天上限。请缩小范围后分次查询。` }
+  if (span > maxSpan) {
+    return { error: `时间跨度为 ${span} 天，超过 ${maxSpan} 天上限。请缩小范围后分次查询。` }
   }
   return { start, end }
+}
+
+function pageArgs(args, maxLimit) {
+  const rawLimit = args?.limit
+  const rawOffset = args?.offset
+  let limit = DEFAULT_LIMIT
+  if (rawLimit !== undefined && rawLimit !== null) {
+    limit = Number(rawLimit)
+    if (!Number.isInteger(limit) || limit < 1 || limit > maxLimit) {
+      return { error: `limit 需要是 1 到 ${maxLimit} 之间的整数` }
+    }
+  }
+  let offset = 0
+  if (rawOffset !== undefined && rawOffset !== null) {
+    offset = Number(rawOffset)
+    if (!Number.isInteger(offset) || offset < 0) {
+      return { error: 'offset 需要是不小于 0 的整数' }
+    }
+  }
+  return { limit, offset }
+}
+
+function pageMeta(total, offset, returned) {
+  const next = offset + returned
+  return { total, returned, nextOffset: next < total ? next : null }
+}
+
+function escapeLike(s) {
+  return String(s).replace(/[\\%_]/g, (m) => '\\' + m)
+}
+
+function round1(n) {
+  return Math.round(n * 10) / 10
+}
+
+function round2(n) {
+  return Math.round(n * 100) / 100
+}
+
+function statsPeriod(day, granularity) {
+  if (granularity === 'day') return day
+  if (granularity === 'month') return day.slice(0, 7)
+  // 周：以周一为起点
+  const d = new Date(`${day}T00:00:00Z`)
+  const dow = d.getUTCDay() || 7
+  d.setUTCDate(d.getUTCDate() - (dow - 1))
+  return d.toISOString().slice(0, 10)
+}
+
+function makeSnippet(note, query, max = 120) {
+  const text = String(note || '').replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  const idx = text.toLowerCase().indexOf(String(query).toLowerCase())
+  if (idx < 0) return text.length > max ? text.slice(0, max) + '…' : text
+  let start = Math.max(0, idx - 40)
+  let end = Math.min(text.length, start + max)
+  if (end === text.length) start = Math.max(0, end - max)
+  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
 }
 
 export const FUNCTION_TOOLS = [
@@ -41,12 +101,18 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'get_days',
       description:
-        '读取指定日期范围内的情绪记录。返回每天的扭蛋：id（仅内部使用的编号）、indexInDay（当天第几颗）、日期、分值、理由摘要、标签。单次跨度不能超过 90 天。',
+        '读取指定日期范围内的情绪记录。返回 total/returned/nextOffset/items；还有更多时用 nextOffset 作为下一次的 offset。默认返回理由摘要和标签；includeNotes=false 时只返回 id/day/indexInDay/score/originalScore，适合长区间扫描。需要单条完整理由时用 get_record。单次跨度不能超过 90 天。',
       parameters: {
         type: 'object',
         properties: {
-          start: { type: 'string', description: '起始日期，YYYY-MM-DD' },
-          end: { type: 'string', description: '结束日期，YYYY-MM-DD' }
+          start: { type: 'string', description: '起始日期，YYYY-MM-DD（包含）' },
+          end: { type: 'string', description: '结束日期，YYYY-MM-DD（包含）' },
+          includeNotes: {
+            type: 'boolean',
+            description: '是否返回理由摘要和标签，默认 true。设为 false 时只返回核心分值字段，用于快速扫描长区间。'
+          },
+          limit: { type: 'integer', description: '本页条数，默认 20，最大 60' },
+          offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
         },
         required: ['start', 'end']
       }
@@ -56,14 +122,17 @@ export const FUNCTION_TOOLS = [
     type: 'function',
     function: {
       name: 'get_tags',
-      description: '读取指定日期范围内 AI 为记录生成的标签（洞察、建议、模式、纠正）。单次跨度不能超过 90 天。',
+      description:
+        '读取指定日期范围内 AI 为记录生成的标签（洞察、建议、模式、纠正）。列表内容截断到 60 字，返回 id/recordId/contentTruncated；需要全文时传 id（此时忽略日期和分页）。单次跨度不能超过 90 天。',
       parameters: {
         type: 'object',
         properties: {
-          start: { type: 'string', description: '起始日期，YYYY-MM-DD' },
-          end: { type: 'string', description: '结束日期，YYYY-MM-DD' }
-        },
-        required: ['start', 'end']
+          start: { type: 'string', description: '起始日期，YYYY-MM-DD（包含）' },
+          end: { type: 'string', description: '结束日期，YYYY-MM-DD（包含）' },
+          id: { type: 'integer', description: '标签编号；传了就返回这一条标签的完整内容' },
+          limit: { type: 'integer', description: '本页条数，默认 20，最大 60' },
+          offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
+        }
       }
     }
   },
@@ -86,12 +155,65 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'get_report',
       description:
-        '读取过往 AI 分析报告。不传 id 时返回最近的报告列表（编号、类型、周期、开头摘要）；传 id 时返回该报告全文。',
+        '读取过往 AI 分析报告。不传 id 时返回报告列表（编号、类型、周期、开头摘要），返回 total/returned/nextOffset，可用 limit/offset 翻页；传 id 时返回该报告全文。',
       parameters: {
         type: 'object',
         properties: {
-          id: { type: 'integer', description: '报告编号；省略则列出最近报告' }
+          id: { type: 'integer', description: '报告编号；省略则列出报告' },
+          limit: { type: 'integer', description: '本页条数，默认 20，最大 20' },
+          offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
         }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_range_stats',
+      description:
+        '读取一段时间的情绪聚合统计，适合先看长期趋势。自动按跨度选择粒度（≤31 天按天、≤180 天按周、更长按月），返回总量、时间序列、最低/最高记录、标签计数和理由覆盖率。单次跨度不能超过 5 年。',
+      parameters: {
+        type: 'object',
+        properties: {
+          start: { type: 'string', description: '起始日期，YYYY-MM-DD（包含）' },
+          end: { type: 'string', description: '结束日期，YYYY-MM-DD（包含）' }
+        },
+        required: ['start', 'end']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_facts',
+      description:
+        '读取用户的长期事实。预注入只包含前 30 条；需要查看或搜索更多事实时使用。返回 total/returned/nextOffset/items。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '可选关键词，1-50 字；按内容子串匹配' },
+          limit: { type: 'integer', description: '本页条数，默认 20，最大 100' },
+          offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_records',
+      description:
+        '在理由中搜索关键词，返回匹配记录和上下文片段。适合定位某件事发生在哪几天。不传日期则搜索全部历史；返回 total/returned/nextOffset/items。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜索关键词，1-50 字' },
+          start: { type: 'string', description: '可选起始日期，YYYY-MM-DD（包含）' },
+          end: { type: 'string', description: '可选结束日期，YYYY-MM-DD（包含）' },
+          limit: { type: 'integer', description: '本页条数，默认 20，最大 50' },
+          offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
+        },
+        required: ['query']
       }
     }
   },
@@ -171,76 +293,137 @@ export const FUNCTION_TOOLS = [
 function getDays(userId, args) {
   const range = rangeArgs(args)
   if (range.error) return { ok: false, reason: 'bad_args', hint: range.error }
+  const page = pageArgs(args, MAX_ITEMS)
+  if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
+  const includeNotes = args?.includeNotes !== false
+
+  const total = db
+    .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day >= ? AND day <= ?')
+    .get(userId, range.start, range.end).c
 
   const rows = db
     .prepare(
-      `SELECT id, day, score, original_score, note FROM records
-       WHERE user_id = ? AND day >= ? AND day <= ?
-       ORDER BY day ASC, id ASC`
+      `SELECT r.id, r.day, r.score, r.original_score, r.note,
+         (SELECT COUNT(*) FROM records r2
+          WHERE r2.user_id = r.user_id AND r2.day = r.day AND r2.id <= r.id) AS index_in_day
+       FROM records r
+       WHERE r.user_id = ? AND r.day >= ? AND r.day <= ?
+       ORDER BY r.day ASC, r.id ASC
+       LIMIT ? OFFSET ?`
     )
-    .all(userId, range.start, range.end)
-
-  const tags = db
-    .prepare(
-      `SELECT t.record_id, t.content FROM record_tags t
-       JOIN records r ON r.id = t.record_id
-       WHERE t.user_id = ? AND r.day >= ? AND r.day <= ?
-       ORDER BY t.id ASC`
-    )
-    .all(userId, range.start, range.end)
+    .all(userId, range.start, range.end, page.limit, page.offset)
 
   const tagsByRecord = {}
-  for (const t of tags) {
-    const list = tagsByRecord[t.record_id] || (tagsByRecord[t.record_id] = [])
-    if (list.length < 3) list.push(String(t.content || '').slice(0, 20))
+  if (includeNotes && rows.length) {
+    const ids = rows.map((r) => r.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const tags = db
+      .prepare(
+        `SELECT record_id, content FROM record_tags
+         WHERE user_id = ? AND record_id IN (${placeholders})
+         ORDER BY id ASC`
+      )
+      .all(userId, ...ids)
+    for (const t of tags) {
+      const list = tagsByRecord[t.record_id] || (tagsByRecord[t.record_id] = [])
+      if (list.length < 3) list.push(String(t.content || '').slice(0, 20))
+    }
   }
 
-  const total = rows.length
-  const dayCounter = {}
-  const items = rows.slice(0, MAX_ITEMS).map((r) => {
-    const note = String(r.note || '').replace(/\s+/g, ' ').trim()
-    const indexInDay = (dayCounter[r.day] = (dayCounter[r.day] || 0) + 1)
-    const item = { id: r.id, day: r.day, indexInDay, score: r.score }
+  const items = rows.map((r) => {
+    const item = { id: r.id, day: r.day, indexInDay: r.index_in_day, score: r.score }
     if (r.original_score != null) item.originalScore = r.original_score
-    if (note) {
-      item.note = note.slice(0, NOTE_PREVIEW)
-      if (note.length > NOTE_PREVIEW) item.noteTruncated = true
+    if (includeNotes) {
+      const note = String(r.note || '').replace(/\s+/g, ' ').trim()
+      if (note) {
+        item.note = note.slice(0, NOTE_PREVIEW)
+        if (note.length > NOTE_PREVIEW) item.noteTruncated = true
+      }
+      const ts = tagsByRecord[r.id]
+      if (ts && ts.length) item.tags = ts
     }
-    const ts = tagsByRecord[r.id]
-    if (ts && ts.length) item.tags = ts
     return item
   })
 
-  const out = { ok: true, start: range.start, end: range.end, total, returned: items.length, items }
-  if (total > MAX_ITEMS) {
-    out.hint = `共 ${total} 条，只返回最早 ${MAX_ITEMS} 条。请把范围缩小到更短的区间再查。`
+  return {
+    ok: true,
+    start: range.start,
+    end: range.end,
+    includeNotes,
+    ...pageMeta(total, page.offset, items.length),
+    items
   }
-  return out
 }
 
 function getTags(userId, args) {
+  if (args?.id !== undefined && args?.id !== null) {
+    const id = Number(args.id)
+    if (!Number.isInteger(id) || id <= 0) {
+      return { ok: false, reason: 'bad_args', hint: 'id 需要是正整数' }
+    }
+    const row = db
+      .prepare(
+        `SELECT t.id, t.record_id, r.day, t.tag_type, t.content
+         FROM record_tags t JOIN records r ON r.id = t.record_id
+         WHERE t.id = ? AND t.user_id = ?`
+      )
+      .get(id, userId)
+    if (!row) return { ok: false, reason: 'not_found', hint: '没有找到这条标签' }
+    return {
+      ok: true,
+      item: {
+        id: row.id,
+        recordId: row.record_id,
+        day: row.day,
+        tagType: row.tag_type,
+        content: String(row.content || '')
+      }
+    }
+  }
+
   const range = rangeArgs(args)
   if (range.error) return { ok: false, reason: 'bad_args', hint: range.error }
+  const page = pageArgs(args, MAX_ITEMS)
+  if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
+
+  const total = db
+    .prepare(
+      `SELECT COUNT(*) AS c FROM record_tags t
+       JOIN records r ON r.id = t.record_id
+       WHERE t.user_id = ? AND r.day >= ? AND r.day <= ?`
+    )
+    .get(userId, range.start, range.end).c
 
   const rows = db
     .prepare(
-      `SELECT r.day, t.tag_type, t.content FROM record_tags t
+      `SELECT t.id, t.record_id, r.day, t.tag_type, t.content
+       FROM record_tags t
        JOIN records r ON r.id = t.record_id
        WHERE t.user_id = ? AND r.day >= ? AND r.day <= ?
-       ORDER BY r.day ASC, t.id ASC`
+       ORDER BY r.day ASC, t.id ASC
+       LIMIT ? OFFSET ?`
     )
-    .all(userId, range.start, range.end)
+    .all(userId, range.start, range.end, page.limit, page.offset)
 
-  const total = rows.length
-  const items = rows.slice(0, MAX_ITEMS).map((r) => ({
-    day: r.day,
-    kind: r.tag_type,
-    content: String(r.content || '').slice(0, 60)
-  }))
+  const items = rows.map((r) => {
+    const content = String(r.content || '')
+    return {
+      id: r.id,
+      recordId: r.record_id,
+      day: r.day,
+      tagType: r.tag_type,
+      content: content.slice(0, 60),
+      contentTruncated: content.length > 60
+    }
+  })
 
-  const out = { ok: true, start: range.start, end: range.end, total, returned: items.length, items }
-  if (total > MAX_ITEMS) out.hint = `共 ${total} 条，只返回最早 ${MAX_ITEMS} 条。请缩小范围。`
-  return out
+  return {
+    ok: true,
+    start: range.start,
+    end: range.end,
+    ...pageMeta(total, page.offset, items.length),
+    items
+  }
 }
 
 function getRecord(userId, args) {
@@ -267,7 +450,10 @@ function getReport(userId, args) {
   // couple_key 是 "小id|大id"，用两端匹配确保只能读自己参与的双人报告
   const coupleLikeA = `%|${userId}`
   const coupleLikeB = `${userId}|%`
-  if (Number.isInteger(id) && id > 0) {
+  if (args?.id !== undefined && args?.id !== null) {
+    if (!Number.isInteger(id) || id <= 0) {
+      return { ok: false, reason: 'bad_args', hint: 'id 需要是正整数' }
+    }
     const r = db
       .prepare(
         `SELECT id, scope, period_type, period_start, period_end, content, generated_at FROM insights
@@ -289,17 +475,24 @@ function getReport(userId, args) {
     }
   }
 
+  const page = pageArgs(args, 20)
+  if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
+
+  const where = 'user_id = ? OR couple_key LIKE ? OR couple_key LIKE ?'
+  const params = [userId, coupleLikeA, coupleLikeB]
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM insights WHERE ${where}`).get(...params).c
   const rows = db
     .prepare(
       `SELECT id, scope, period_type, period_start, period_end, content, generated_at
-       FROM insights WHERE user_id = ? OR couple_key LIKE ? OR couple_key LIKE ?
-       ORDER BY period_start DESC, id DESC LIMIT 5`
+       FROM insights WHERE ${where}
+       ORDER BY period_start DESC, id DESC
+       LIMIT ? OFFSET ?`
     )
-    .all(userId, coupleLikeA, coupleLikeB)
+    .all(...params, page.limit, page.offset)
 
   return {
     ok: true,
-    total: rows.length,
+    ...pageMeta(total, page.offset, rows.length),
     items: rows.map((r) => ({
       id: r.id,
       scope: r.scope,
@@ -311,6 +504,222 @@ function getReport(userId, args) {
     })),
     hint: '需要全文请再用 get_report 并传入 id'
   }
+}
+
+function getRangeStats(userId, args) {
+  const range = rangeArgs(args, MAX_STATS_SPAN_DAYS)
+  if (range.error) return { ok: false, reason: 'bad_args', hint: range.error }
+
+  const rows = db
+    .prepare(
+      `SELECT id, day, score, note FROM records
+       WHERE user_id = ? AND day >= ? AND day <= ?
+       ORDER BY day ASC, id ASC`
+    )
+    .all(userId, range.start, range.end)
+
+  const span = dayDiff(range.start, range.end)
+  const granularity = span <= 31 ? 'day' : span <= 180 ? 'week' : 'month'
+
+  const tagCounts = { insight: 0, suggestion: 0, pattern: 0, correction: 0 }
+  const tagRows = db
+    .prepare(
+      `SELECT t.tag_type, COUNT(*) AS c FROM record_tags t
+       JOIN records r ON r.id = t.record_id
+       WHERE t.user_id = ? AND r.day >= ? AND r.day <= ?
+       GROUP BY t.tag_type`
+    )
+    .all(userId, range.start, range.end)
+  for (const row of tagRows) {
+    if (row.tag_type in tagCounts) tagCounts[row.tag_type] = row.c
+  }
+
+  if (!rows.length) {
+    return {
+      ok: true,
+      start: range.start,
+      end: range.end,
+      granularity,
+      firstDay: null,
+      lastDay: null,
+      recordCount: 0,
+      recordedDays: 0,
+      avg: null,
+      min: null,
+      max: null,
+      series: [],
+      lowestRecords: [],
+      highestRecords: [],
+      tagCounts,
+      notedRecordCount: 0,
+      noteCoverage: 0
+    }
+  }
+
+  const days = new Set()
+  const buckets = new Map()
+  let sum = 0
+  let min = Infinity
+  let max = -Infinity
+  let notedRecordCount = 0
+
+  for (const r of rows) {
+    days.add(r.day)
+    sum += r.score
+    if (r.score < min) min = r.score
+    if (r.score > max) max = r.score
+    if (String(r.note || '').trim()) notedRecordCount += 1
+
+    const period = statsPeriod(r.day, granularity)
+    let b = buckets.get(period)
+    if (!b) {
+      b = { recordCount: 0, days: new Set(), sum: 0, min: r.score, max: r.score }
+      buckets.set(period, b)
+    }
+    b.recordCount += 1
+    b.days.add(r.day)
+    b.sum += r.score
+    if (r.score < b.min) b.min = r.score
+    if (r.score > b.max) b.max = r.score
+  }
+
+  const series = [...buckets.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([period, b]) => ({
+      period,
+      recordCount: b.recordCount,
+      recordedDays: b.days.size,
+      avg: round1(b.sum / b.recordCount),
+      min: b.min,
+      max: b.max
+    }))
+
+  const lowestRecords = [...rows]
+    .sort((a, b) => a.score - b.score || a.day.localeCompare(b.day) || a.id - b.id)
+    .slice(0, 5)
+    .map((r) => ({ id: r.id, day: r.day, score: r.score }))
+  const highestRecords = [...rows]
+    .sort((a, b) => b.score - a.score || b.day.localeCompare(a.day) || b.id - a.id)
+    .slice(0, 5)
+    .map((r) => ({ id: r.id, day: r.day, score: r.score }))
+
+  return {
+    ok: true,
+    start: range.start,
+    end: range.end,
+    granularity,
+    firstDay: rows[0].day,
+    lastDay: rows[rows.length - 1].day,
+    recordCount: rows.length,
+    recordedDays: days.size,
+    avg: round1(sum / rows.length),
+    min,
+    max,
+    series,
+    lowestRecords,
+    highestRecords,
+    tagCounts,
+    notedRecordCount,
+    noteCoverage: round2(notedRecordCount / rows.length)
+  }
+}
+
+function getFacts(userId, args) {
+  const page = pageArgs(args, 100)
+  if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
+
+  let query = null
+  if (args?.query !== undefined && args?.query !== null) {
+    query = String(args.query).trim()
+    if (!query || query.length > 50) {
+      return { ok: false, reason: 'bad_args', hint: 'query 需要是 1 到 50 个字符' }
+    }
+  }
+
+  const where = query ? `user_id = ? AND content LIKE ? ESCAPE '\\'` : 'user_id = ?'
+  const params = query ? [userId, `%${escapeLike(query)}%`] : [userId]
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM facts WHERE ${where}`).get(...params).c
+  const rows = db
+    .prepare(
+      `SELECT id, content, confidence, pinned FROM facts
+       WHERE ${where}
+       ORDER BY pinned DESC, confidence DESC, id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...params, page.limit, page.offset)
+
+  const out = {
+    ok: true,
+    ...pageMeta(total, page.offset, rows.length),
+    items: rows.map((r) => ({
+      id: r.id,
+      content: String(r.content || ''),
+      confidence: r.confidence,
+      pinned: Boolean(r.pinned)
+    }))
+  }
+  if (query) out.query = query
+  return out
+}
+
+function searchRecords(userId, args) {
+  const query = String(args?.query ?? '').trim()
+  if (!query || query.length > 50) {
+    return { ok: false, reason: 'bad_args', hint: 'query 需要是 1 到 50 个字符' }
+  }
+
+  const hasStart = args?.start !== undefined && args?.start !== null && String(args.start).trim() !== ''
+  const hasEnd = args?.end !== undefined && args?.end !== null && String(args.end).trim() !== ''
+  if (hasStart !== hasEnd) {
+    return { ok: false, reason: 'bad_args', hint: 'start 和 end 需要同时提供，或都不提供' }
+  }
+
+  let start = null
+  let end = null
+  if (hasStart) {
+    const range = rangeArgs(args, 3650)
+    if (range.error) return { ok: false, reason: 'bad_args', hint: range.error }
+    start = range.start
+    end = range.end
+  }
+
+  const page = pageArgs(args, 50)
+  if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
+
+  const clauses = ['user_id = ?', `note LIKE ? ESCAPE '\\'`]
+  const params = [userId, `%${escapeLike(query)}%`]
+  if (hasStart) {
+    clauses.push('day >= ? AND day <= ?')
+    params.push(start, end)
+  }
+  const where = clauses.join(' AND ')
+
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM records WHERE ${where}`).get(...params).c
+  const rows = db
+    .prepare(
+      `SELECT id, day, score, note FROM records
+       WHERE ${where}
+       ORDER BY day DESC, id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...params, page.limit, page.offset)
+
+  const out = {
+    ok: true,
+    query,
+    ...pageMeta(total, page.offset, rows.length),
+    items: rows.map((r) => ({
+      id: r.id,
+      day: r.day,
+      score: r.score,
+      snippet: makeSnippet(r.note, query)
+    }))
+  }
+  if (hasStart) {
+    out.start = start
+    out.end = end
+  }
+  return out
 }
 
 // ======== 写入提议 ========
@@ -482,6 +891,9 @@ export function executeTool(name, args, ctx) {
     else if (name === 'get_tags') data = getTags(userId, args)
     else if (name === 'get_record') data = getRecord(userId, args)
     else if (name === 'get_report') data = getReport(userId, args)
+    else if (name === 'get_range_stats') data = getRangeStats(userId, args)
+    else if (name === 'get_facts') data = getFacts(userId, args)
+    else if (name === 'search_records') data = searchRecords(userId, args)
     else if (
       name === 'propose_fact' ||
       name === 'propose_tag' ||
@@ -501,11 +913,19 @@ export function executeTool(name, args, ctx) {
 
   const text = JSON.stringify(data)
   if (text.length > MAX_RESULT_CHARS) {
+    const hints = {
+      get_days: '结果过大。请减小 limit，或把 includeNotes 设为 false，或缩小日期范围。',
+      get_tags: '结果过大。请减小 limit 或缩小日期范围。',
+      get_report: '结果过大。请减小 limit。',
+      get_facts: '结果过大。请减小 limit 或提供更具体的 query。',
+      search_records: '结果过大。请减小 limit 或缩小日期范围。',
+      get_range_stats: '结果过大。请缩短日期范围。'
+    }
     return JSON.stringify({
       ok: false,
       reason: 'result_too_large',
       approxChars: text.length,
-      hint: '结果过大。请把日期范围缩小到 7 天以内再查询。'
+      hint: hints[name] || '结果过大。请缩小查询范围。'
     })
   }
   return text

@@ -24,7 +24,8 @@ export function buildChatMessages({
 语气：简短、温暖、像朋友一样，一次回答控制在 200 字以内。
 只依据上下文和你读到的内容回答，不要编造未出现的事实；不知道就说不知道。
 需要某几天的具体记录、分值或标签时，调用 get_days / get_tags 查询，不要凭印象推测。
-理由被截断时用 get_record 取全文；需要回顾过往分析时用 get_report。
+结果里有 nextOffset 时，把它作为 offset 继续查；理由被截断时用 get_record 取全文；标签被截断时用 get_tags 传 id 取全文；需要回顾过往分析时用 get_report。
+看长期趋势先用 get_range_stats；按关键词定位某件事用 search_records；预注入的 facts 不够时用 get_facts。
 如果用户明确说出长期不变的偏好、习惯、关系或重要事件，可以用 propose_fact 提议记入记忆。
 给某一天的记录补充洞察、建议、模式或纠正时用 propose_tag，recordId 必须来自 get_days / get_record，不要编造；给用户描述时要说明是「哪一天的第几颗」。
 回复用户时不要提记录的内部编号（如「137 号球」），一律用日期 + 当天第几颗来描述，例如「11 月 20 日第 2 颗」。

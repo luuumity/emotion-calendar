@@ -95,6 +95,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ---------- AI 报告（insights） ----------
 
+export type ColdStartInfo = {
+  hasRecords: boolean
+  needed: boolean
+  start: string | null
+  end: string | null
+  recordCount: number
+}
+
 export type Insight = {
   id: number
   scope: 'single' | 'couple'
@@ -239,10 +247,16 @@ export const api = {
   deleteFact: (id: number) => request<{ ok: true }>(`/facts/${id}`, { method: 'DELETE' }),
 
   // ---- insights ----
-  insights: () => request<{ insights: Insight[] }>('/insights'),
+  insights: () => request<{ insights: Insight[]; coldStart: ColdStartInfo }>('/insights'),
   insight: (id: number) => request<{ insight: Insight }>(`/insights/${id}`),
   generateSingleInsight: (body: { periodType?: 'week' | 'month' | 'manual'; start?: string; end?: string }) =>
-    request<{ insight: Insight; usage?: { total_tokens: number } | null; hasKey?: boolean; existing?: boolean }>(
+    request<{
+      insight: Insight
+      usage?: { total_tokens: number } | null
+      hasKey?: boolean
+      existing?: boolean
+      coldStart?: boolean
+    }>(
       '/insights/single/generate',
       {
         method: 'POST',
