@@ -82,6 +82,13 @@ function toolRules() {
 - 不要向用户展示任何编号，也不要在正文里提「记录 123」这类内部标识。`
 }
 
+function periodDayCount(periodStart, periodEnd) {
+  const start = Date.parse(`${periodStart}T00:00:00+08:00`)
+  const end = Date.parse(`${periodEnd}T00:00:00+08:00`)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0
+  return Math.round((end - start) / 86400000) + 1
+}
+
 function buildSummaryBlock(records) {
   const summary = buildScoreSummary(records)
   if (!summary.balls) return '本周期没有记录。'
@@ -107,6 +114,9 @@ export function buildSingleReportMessages({
 
   const firstNote = isFirst ? '\n这是用户的第一份报告；可以在开头用一句话说明这是从哪里开始记录、到哪里为止。\n' : ''
 
+  const spanDays = periodDayCount(periodStart, periodEnd)
+  const weekHeading = spanDays > 8 ? '这段时间的你' : '这一周的你'
+
   const outline = longSpan
     ? `结构（用中文，标题加粗，400-600 字）：
 1. **长期趋势**：这段时间整体走向与最明显的变化（用感受词描述，不写平均分）
@@ -114,7 +124,7 @@ export function buildSingleReportMessages({
 3. **当前模式**：用户现在最容易反复出现的模式，尽量关联具体理由
 4. **一个具体建议**：给一个现在就能做的小动作，不要空泛`
     : `结构（用中文，标题加粗，200-400 字）：
-1. **这一周的你**：用感受词描述这一周大致落在哪一档、波动跨度，以及是在变好、变差还是平稳
+1. **${weekHeading}**：用感受词描述${spanDays > 8 ? '这段时间' : '这一周'}大致落在哪一档、波动跨度，以及是在变好、变差还是平稳
 2. **什么在影响你**：什么情境下情绪偏低或偏高（用档位词，如「偏凉」「挺开心」；有理由就尽量关联）
 3. **你可能没注意到**：你观察到但用户可能没注意到的一件小事
 4. **下次可以试试**：给一个具体、可操作的小建议（不要是"继续加油"这种空泛话）`
