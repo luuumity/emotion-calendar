@@ -9,7 +9,7 @@ import { callDeepSeek } from '../lib/llm.js'
 import { ensureCompressed } from '../lib/compress.js'
 import { getDefaultSystemPrompt } from '../lib/persona.js'
 import { buildChatMessages } from '../lib/prompts/chat.js'
-import { buildTraceLogBlock } from '../lib/trace-log.js'
+import { buildTraceLogEntries, isTraceLogEnabled } from '../lib/trace-log.js'
 import { FUNCTION_TOOLS, executeTool } from '../lib/tools.js'
 import { withLiveTagTarget } from '../lib/proposalView.js'
 
@@ -429,23 +429,27 @@ router.post('/sessions/:id/messages', async (req, res) => {
   // 条数上限只是压缩降级时的熔断，正常由 token 阈值压缩兜底
   const history = db
     .prepare(
-      `SELECT role, content FROM chat_messages
+      `SELECT id, role, content FROM chat_messages
        WHERE session_id = ? AND id > ? AND id < ?
        ORDER BY id DESC LIMIT 60`
     )
     .all(id, compressed.untilId, userInfo.lastInsertRowid)
     .reverse()
     .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role, content: String(m.content || '') }))
+    .map((m) => ({ id: m.id, role: m.role, content: String(m.content || '') }))
 
   // 4. 稳定块 / 事实 / 记忆块 / 压缩摘要
   const displayName = db.prepare('SELECT display_name FROM users WHERE id = ?').get(req.user.id)?.display_name || '用户'
   const factsBlock = buildFactsBlock(req.user.id)
   const memoryBlock = buildMemoryBlock(req.user.id)
   const summaryBlock = compressed.summary ? `【本次对话的早期摘要】\n${compressed.summary}` : ''
-  const traceLogBlock = buildTraceLogBlock(id)
 
-  // 5. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史 → 查询日志 → 临时提示 → 本轮
+  // 只给“正文仍完整保留”的任务生成日志：turn_id 必须晚于压缩水位
+  const traceLogs = isTraceLogEnabled()
+    ? buildTraceLogEntries(id, { turns: 6, maxChars: 2500, minTurnId: compressed.untilId })
+    : []
+
+  // 5. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史（日志成对插入） → 临时提示 → 本轮
   const messages = buildChatMessages({
     personaPrompt: getDefaultSystemPrompt(),
     displayName,
@@ -453,7 +457,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
     memoryBlock,
     summaryBlock,
     history,
-    traceLogBlock,
+    traceLogs,
     noticeBlock: proposalNotice,
     userMessage: content,
     refs

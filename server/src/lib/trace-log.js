@@ -282,26 +282,43 @@ export function renderRecentLogs(logs, { includeQuestion = true, includeTurnId =
   return parts.join('\n')
 }
 
-const TRACE_LOG_PREFACE =
-  '【最近查询记录】\n以下查询已经完成，不要重复全量扫描；需要细节时按记录里的 id 重取，不要向用户展示内部编号。'
+const TRACE_LOG_HEADER = '【查询记录】'
+
+function renderLogBlock(log, includeQuestion) {
+  const lines = [TRACE_LOG_HEADER]
+  if (includeQuestion && log.question) lines.push(`[问：${clean(log.question, 40)}]`)
+  for (const line of log.lines) lines.push(`- ${line}`)
+  return lines.join('\n')
+}
+
+// 环境变量 CHAT_TRACE_LOG=0 可关闭日志注入；默认开启。
+export function isTraceLogEnabled() {
+  return process.env.CHAT_TRACE_LOG !== '0'
+}
 
 /**
- * 生成注入用的聚合日志块。超过预算时先丢最旧的轮次，单轮仍超长再按行截断。
+ * 生成按 turn 分组的日志块，供成对插入使用。
+ * minTurnId：只保留 turn_id 大于它的任务，用来排除已被压缩的任务。
+ * 超过预算时先丢最旧的任务，单任务仍超长再按行截断。
  */
-export function buildTraceLogBlock(
+export function buildTraceLogEntries(
   sessionId,
-  { turns = 6, maxChars = 2500, includeQuestion = true } = {}
+  { turns = 6, maxChars = 2500, includeQuestion = false, minTurnId = 0 } = {}
 ) {
-  let logs = buildRecentTurnLogs(sessionId, turns).filter((log) => log.lines.length)
-  if (!logs.length) return ''
+  const logs = buildRecentTurnLogs(sessionId, turns).filter(
+    (log) => log.lines.length && log.turnId > minTurnId
+  )
+  if (!logs.length) return []
 
-  let text = renderRecentLogs(logs, { includeQuestion })
-  while (logs.length > 1 && text.length > maxChars) {
-    logs = logs.slice(1)
-    text = renderRecentLogs(logs, { includeQuestion })
+  const entries = logs.map((log) => ({
+    turnId: log.turnId,
+    block: renderLogBlock(log, includeQuestion)
+  }))
+  const total = () => entries.reduce((sum, entry) => sum + entry.block.length + 1, 0)
+  while (entries.length > 1 && total() > maxChars) entries.shift()
+  if (entries.length && total() > maxChars) {
+    const last = entries[entries.length - 1]
+    last.block = last.block.slice(0, maxChars).replace(/\n[^\n]*$/, '\n…')
   }
-  if (text.length > maxChars) {
-    text = text.slice(0, maxChars).replace(/\n[^\n]*$/, '\n…')
-  }
-  return text.replace('【最近查询记录】', TRACE_LOG_PREFACE)
+  return entries
 }

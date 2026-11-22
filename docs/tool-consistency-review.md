@@ -183,21 +183,22 @@
 - ~~再实现注入（`system` 块，最近 N 轮），在同一测试会话做 A/B。~~ 已完成，见第十一节。
 - 清理测试会话 15 或保留供对照。
 
-## 十一、聚合日志注入与 A/B 验证（已上线）
+## 十一、日志注入：聚合 A/B → 成对插入（已上线）
 
 ### 文件
-- `server/src/lib/trace-log.js`：读取 `chat_trace_events`，按工具类型压成单行；支持单轮、最近 N 轮和聚合注入块。
+- `server/src/lib/trace-log.js`：读取 `chat_trace_events`，按工具类型压成单行；支持单轮、最近 N 轮、按 turn 分组的注入块和开关。
 - `server/scripts/trace-log.mjs`：只读 CLI。
-- `server/src/routes/chat.js`：调用 `buildTraceLogBlock(sessionId)`，传给 `buildChatMessages`。
-- `server/src/lib/prompts/chat.js`：新增 `traceLogBlock` 参数，插在 history 之后、待确认建议和本轮 user 之前。
+- `server/src/routes/chat.js`：调用 `buildTraceLogEntries(sessionId, { minTurnId })`，传给 `buildChatMessages`。
+- `server/src/lib/prompts/chat.js`：新增 `traceLogs` 参数，把每条日志插在对应 assistant 回答之后。
 
-### 注入参数
-- 最近 **6 个有工具轨迹的任务**；
-- 单块上限 **2,500 字符**，超了先丢最旧任务，仍超长再按行截断；
-- 日志从 `chat_trace_events` 临时生成，不落 `chat_messages`，因此压缩不会删它；
-- prompt 规则新增一句：优先用日志确认查过什么，不重复全量扫描，需要原文按 id 重取，不向用户展示内部编号。
+### 注入方式
+- **成对插入**：`user → assistant → system【查询记录】`，日志跟着它所属的任务走。
+- **只注入正文仍完整的任务**：`turn_id > compressed.untilId`；被压缩掉的任务不再插日志，避免“日志在、正文没了”的孤儿日志。
+- 最近 **6 个有工具轨迹的任务**；总预算 **2,500 字符**，超了先丢最旧任务，单任务仍超长再按行截断。
+- 日志从 `chat_trace_events` 临时生成，不落 `chat_messages`；压缩不会修改它，但压缩水位会决定它是否注入。
+- 开关：环境变量 `CHAT_TRACE_LOG=0` 关闭，默认开启。
 
-### A/B 结果
+### A/B 结果（聚合版本）
 
 基线为 session 15（无日志注入），注入后为 session 14（原始会话，messages 85-92）。token 为单轮累计 `usage.total_tokens`。
 
@@ -212,12 +213,12 @@
 - **过程型追问被修复**：Q2/Q5 从“错误否认”变成 0 次工具调用、回答正确。
 - **内容型追问更省**：Q1 从 2 次调用降到 1 次，token 从 18,285 降到 12,092。
 - **没有诱发幻觉**：Q4 仍调用 `get_days` 拿全量分值，说明日志只提供“查过什么”，没有替代真实数据。
-- **成本**：日志块约 1.4–1.8k 字符；Q4 这类本来只需 1 次调用的场景，总 token 增加约 2.1k，属于可接受范围。
-- **当前窗口**：6 个任务 / 2,500 字符，本次失败在窗口内，所以 Q2/Q5 能答对。
+- **成本**：日志块约 1.1–1.8k 字符；Q4 这类本来只需 1 次调用的场景，总 token 增加约 2.1k，属于可接受范围。
+- **当前形态**：成对插入 + 压缩水位过滤。被压缩的任务不插日志，因此不会出现孤儿日志；代价是这些任务的日志也更早从 prompt 消失。
 
 ### 剩余风险
-- 文本被压缩后，日志窗口可能比 history 更长，出现“日志在、正文没了”的孤儿日志；第一版未加回答摘要，长会话需要观察。
 - 超过 6 个任务的旧失败不会进入 prompt；原始 trace 还在库，但模型没有工具回看。需要时再加“历史查询索引”或 `get_turn_logs`。
-- 成对插入（日志跟对应 Q/A 放一起）尚未做；当前仍是聚合注入。
-- session 14 现在多了测试消息 85-92，原始 67-70 未动；session 15 基线保留。
+- 被压缩任务不会注入日志，这是有意的取舍；如果用户追问很旧的任务，模型可能不知道当时查过什么。
+- 当前仍是规则生成日志，不包含原始 note 和 `reasoning_content`；需要原文仍按 id 重取。
+- 注入开关是服务端环境变量，不是用户级设置；多用户需要不同策略时再考虑落到用户配置。
 
