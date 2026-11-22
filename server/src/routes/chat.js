@@ -9,6 +9,7 @@ import { callDeepSeek } from '../lib/llm.js'
 import { ensureCompressed } from '../lib/compress.js'
 import { getDefaultSystemPrompt } from '../lib/persona.js'
 import { buildChatMessages } from '../lib/prompts/chat.js'
+import { buildTraceLogBlock } from '../lib/trace-log.js'
 import { FUNCTION_TOOLS, executeTool } from '../lib/tools.js'
 import { withLiveTagTarget } from '../lib/proposalView.js'
 
@@ -442,8 +443,9 @@ router.post('/sessions/:id/messages', async (req, res) => {
   const factsBlock = buildFactsBlock(req.user.id)
   const memoryBlock = buildMemoryBlock(req.user.id)
   const summaryBlock = compressed.summary ? `【本次对话的早期摘要】\n${compressed.summary}` : ''
+  const traceLogBlock = buildTraceLogBlock(id)
 
-  // 5. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史 → 临时提示 → 本轮
+  // 5. 调模型：稳定前缀 → facts → 记忆 → 压缩摘要 → 历史 → 查询日志 → 临时提示 → 本轮
   const messages = buildChatMessages({
     personaPrompt: getDefaultSystemPrompt(),
     displayName,
@@ -451,6 +453,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
     memoryBlock,
     summaryBlock,
     history,
+    traceLogBlock,
     noticeBlock: proposalNotice,
     userMessage: content,
     refs
