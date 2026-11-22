@@ -318,7 +318,7 @@ export function InsightsPage() {
             <div className="insight-auto-row">
               <div className="insight-auto-row-main">
                 <strong>周报</strong>
-                <small>每周一 03:00 后生成上一完整周</small>
+                <small>每周一 02:00 后生成上一完整周</small>
               </div>
               <Toggle
                 checked={autoDraft.weekly}
@@ -365,7 +365,7 @@ export function InsightsPage() {
             <div className="insight-auto-row">
               <div className="insight-auto-row-main">
                 <strong>周报</strong>
-                <small>每周一 03:00 后生成上一完整周</small>
+                <small>每周一 02:00 后生成上一完整周</small>
               </div>
               <Toggle
                 checked={autoInfo.weekly}

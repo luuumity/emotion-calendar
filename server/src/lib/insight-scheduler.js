@@ -58,11 +58,11 @@ function lastMonthRange(day) {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) }
 }
 
-/** 本地时间是否已过周一 03:00（周日及之后都算）。 */
+/** 本地时间是否已过周一 02:00（周日及之后都算）。 */
 function canRunWeeklyNow(local) {
   const monday = weekStart(local.date)
   if (local.date > monday) return true
-  return local.time >= '03:00'
+  return local.time >= '02:00'
 }
 
 /** 每月 1 日 03:00 之后运行；错过的日期随时补跑。 */
