@@ -85,13 +85,20 @@ export async function ensureCompressed(sessionId) {
     cut.push(m)
     cutChars += len
   }
-  const cutUntil = cut[cut.length - 1].id
+  // 保留区第一条不能是 assistant：否则提问被压走，只剩一条无提问的回答。
+  // 出现这种边界时把切点向前回退（回退的 user 留在保留区），切空就等历史继续增长。
+  // 连续两条 user（上轮模型失败，没写 assistant）时不需要回退，下一条仍是 user。
+  let cutEnd = cut.length
+  while (cutEnd > 0 && pending[cutEnd]?.role === 'assistant') cutEnd--
+  if (!cutEnd) return { summary, untilId }
+  const cutUntil = cut[cutEnd - 1].id
+  const cutRows = cutEnd === cut.length ? cut : cut.slice(0, cutEnd)
 
   const prompt = `把下面这段对话压缩成摘要，不超过 300 字。
 保留：用户提到的具体事件、情绪、关系与困扰、已经讨论过的结论、尚未解决的问题。
 不要评价，不要编造，不要加入对话里没有的信息。只输出摘要正文。
 
-${summary ? `【已有摘要】\n${summary}\n\n` : ''}【新增对话】\n${transcriptOf(cut)}`
+${summary ? `【已有摘要】\n${summary}\n\n` : ''}【新增对话】\n${transcriptOf(cutRows)}`
 
   try {
     const result = await callDeepSeek(
