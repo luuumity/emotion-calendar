@@ -114,6 +114,8 @@ export type Insight = {
   content: string
   model?: string | null
   promptVersion?: string | null
+  origin?: 'manual' | 'auto'
+  kind?: 'cold' | 'weekly' | 'monthly' | 'custom'
   tokens?: number | null
   sources?: { id: number; type: string; content?: string }[] | null
   coveredUntil?: string | null

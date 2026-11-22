@@ -128,7 +128,12 @@ async function runForUser(user, now) {
 
   const generate = async (options, kind) => {
     try {
-      const result = await generateSingleInsightSync({ userId: user.id, nowIso: now.toISOString(), ...options })
+      const result = await generateSingleInsightSync({
+        userId: user.id,
+        nowIso: now.toISOString(),
+        origin: 'auto',
+        ...options
+      })
       resetFailures(user.id)
       if (result.action === 'created' || result.action === 'updated') {
         await pushReport(user.id, kind)
@@ -137,6 +142,10 @@ async function runForUser(user, now) {
         `[insights] 自动报告 user=${user.id} week=${periodStart}..${periodEnd} action=${result.action} cold=${result.coldStart}`
       )
     } catch (err) {
+      if (err.code === 'GENERATION_IN_PROGRESS') {
+        console.log(`[insights] 自动报告跳过 user=${user.id}：已有生成任务`)
+        return
+      }
       const failures = recordFailure(user, periodStart)
       console.error(
         `[insights] 自动报告失败 user=${user.id} week=${periodStart} attempt=${failures}/${MAX_FAILURES}:`,

@@ -367,6 +367,19 @@ const migrations = [
         ALTER TABLE users ADD COLUMN auto_insight_fail_count INTEGER NOT NULL DEFAULT 0;
       `)
     }
+  },
+  {
+    version: 14,
+    // 报告来源与类型：手动/定时、冷启动/周报/月报/自定义
+    up() {
+      db.exec(`
+        ALTER TABLE insights ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
+        ALTER TABLE insights ADD COLUMN kind TEXT NOT NULL DEFAULT 'weekly';
+        UPDATE insights SET kind = 'custom' WHERE scope = 'single' AND period_type = 'manual';
+        UPDATE insights SET kind = 'monthly' WHERE scope = 'single' AND period_type = 'month';
+        UPDATE insights SET kind = 'custom' WHERE scope = 'couple';
+      `)
+    }
   }
 ]
 

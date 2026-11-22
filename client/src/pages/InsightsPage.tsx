@@ -17,6 +17,35 @@ function formatPeriod(insight: Insight) {
   return `${insight.periodStart} ~ ${insight.periodEnd}`
 }
 
+/** 以周一所在月份计数：11 月里的第几个周一就是第几周。 */
+function weekOfMonth(day: string) {
+  const d = new Date(`${day}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return null
+  const year = d.getUTCFullYear()
+  const month = d.getUTCMonth()
+  let count = 0
+  for (let i = 1; i <= d.getUTCDate(); i++) {
+    if (new Date(Date.UTC(year, month, i)).getUTCDay() === 1) count++
+  }
+  return { month: month + 1, count }
+}
+
+function reportTitle(insight: Insight) {
+  if (insight.scope === 'couple') return '双人报告'
+  if (insight.kind === 'cold') return '你的第一份情绪报告'
+  if (insight.kind === 'weekly') {
+    const week = weekOfMonth(insight.periodStart)
+    return week ? `${week.month} 月第 ${week.count} 周` : formatPeriod(insight)
+  }
+  if (insight.kind === 'monthly') {
+    const d = new Date(`${insight.periodStart}T00:00:00Z`)
+    return Number.isNaN(d.getTime())
+      ? formatPeriod(insight)
+      : `${d.getUTCFullYear()} 年 ${d.getUTCMonth() + 1} 月`
+  }
+  return '自定义报告'
+}
+
 function formatTime(iso: string) {
   const d = new Date(iso)
   return d.toLocaleString('zh-CN', {
@@ -517,12 +546,17 @@ function InsightCard({
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onToggle()}
       >
         <div className="insight-card-head-main">
-          <span className={'tag ' + (insight.scope === 'couple' ? 'full' : '')}>
-            {insight.scope === 'couple' ? '双人' : '单人'}
-          </span>
-          <h3>{formatPeriod(insight)}</h3>
+          <div className="insight-card-tags">
+            <span className={'tag ' + (insight.scope === 'couple' ? 'full' : '')}>
+              {insight.scope === 'couple' ? '双人' : '单人'}
+            </span>
+            <span className={'tag ' + (insight.origin === 'auto' ? '' : 'muted')}>
+              {insight.origin === 'auto' ? '定时' : '手动'}
+            </span>
+          </div>
+          <h3>{reportTitle(insight)}</h3>
           <p className="insight-card-meta">
-            {formatTime(insight.generatedAt)}
+            {formatPeriod(insight)} · {formatTime(insight.generatedAt)}
             {insight.tokens ? ` · ${insight.tokens} tokens` : ''}
           </p>
         </div>

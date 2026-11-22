@@ -32,6 +32,8 @@ export function view(row) {
     content: row.content,
     model: row.model,
     promptVersion: row.prompt_version,
+    origin: row.origin || 'manual',
+    kind: row.kind || 'weekly',
     tokens: row.tokens,
     sources: row.sources ? JSON.parse(row.sources) : null,
     coveredUntil: row.covered_until,
@@ -188,23 +190,43 @@ export function findExistingSingleInsight(userId, periodType, start, end) {
     .get(userId, periodType, start)
 }
 
+const generatingUsers = new Set()
+
 /**
  * 生成单人报告（同步等待模型）。
+ * 同一用户同时只允许一个生成任务，避免页面刷新/重复点击产生多份报告。
  * @param {object} input
  * @param {number} input.userId
  * @param {string} [input.periodType] week/month/manual
  * @param {string} [input.customStart]
  * @param {string} [input.customEnd]
  * @param {boolean} [input.force] 已存在时原地重新生成并覆盖（用于覆盖半周报告）
+ * @param {string} [input.origin] manual/auto，报告来源
  * @returns {Promise<{insight: object, usage: object|null, hasKey: boolean, existing: boolean, coldStart: boolean, action: string}>}
  */
-export async function generateSingleInsightSync({
+export async function generateSingleInsightSync(input) {
+  const userId = input?.userId
+  if (generatingUsers.has(userId)) {
+    const err = new Error('正在生成报告，请稍候再试')
+    err.code = 'GENERATION_IN_PROGRESS'
+    throw err
+  }
+  generatingUsers.add(userId)
+  try {
+    return await generateSingleInsightSyncInner(input)
+  } finally {
+    generatingUsers.delete(userId)
+  }
+}
+
+async function generateSingleInsightSyncInner({
   userId,
   periodType = 'week',
   customStart,
   customEnd,
   force = false,
-  nowIso = null
+  nowIso = null,
+  origin = 'manual'
 }) {
   const cold = getSingleColdStartInfo(userId)
   if (!cold.hasRecords) {
@@ -230,6 +252,14 @@ export async function generateSingleInsightSync({
     start = period.start
     end = period.end
   }
+
+  const kind = coldStart
+    ? 'cold'
+    : resolvedType === 'week'
+      ? 'weekly'
+      : resolvedType === 'month'
+        ? 'monthly'
+        : 'custom'
 
   // 先查重：已存在且未要求覆盖，就直接返回，不再调用模型
   const existing = findExistingSingleInsight(userId, resolvedType, start, end)
@@ -311,9 +341,9 @@ export async function generateSingleInsightSync({
   if (existing && force) {
     db.prepare(
       `UPDATE insights
-       SET content = ?, model = ?, prompt_version = ?, tokens = ?, generated_at = ?
+       SET content = ?, model = ?, prompt_version = ?, origin = ?, kind = ?, tokens = ?, generated_at = ?
        WHERE id = ?`
-    ).run(result.content, result.model, 'single-v3', result.usage.total_tokens || 0, now, existing.id)
+    ).run(result.content, result.model, 'single-v3', origin, kind, result.usage.total_tokens || 0, now, existing.id)
     const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(existing.id)
     return {
       insight: view(row),
@@ -330,10 +360,10 @@ export async function generateSingleInsightSync({
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO insights
-        (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, tokens, generated_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens, generated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v3', result.usage.total_tokens || 0, now)
+    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v3', origin, kind, result.usage.total_tokens || 0, now)
 
   const row = findExistingSingleInsight(userId, resolvedType, start, end)
   return {

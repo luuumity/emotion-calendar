@@ -2902,6 +2902,11 @@ p {
   min-width: 0;
 }
 
+.insight-card-tags {
+  display: flex;
+  gap: 6px;
+}
+
 .insight-card-head-main .tag {
   align-self: flex-start;
 }
