@@ -238,7 +238,7 @@ export const FUNCTION_TOOLS = [
     function: {
       name: 'propose_tag',
       description:
-        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。recordId 必须来自 get_days 或 get_record，只作为内部参数，回复用户时不要念编号，用「某天第几颗」描述。只能新增，不能修改或删除已有标签。',
+        '提议给某一条情绪记录添加标签（洞察/建议/模式/纠正）。只是待确认建议，用户确认后才会写入。每条记录最多一个 AI 标签：如果该记录已有 AI 标签，这次提议会替换它；用户手动添加的标签不会被覆盖。recordId 必须来自 get_days 或 get_record，只作为内部参数，回复用户时不要念编号，用「某天第几颗」描述。',
       parameters: {
         type: 'object',
         properties: {
@@ -319,14 +319,18 @@ function getDays(userId, args) {
     const placeholders = ids.map(() => '?').join(',')
     const tags = db
       .prepare(
-        `SELECT record_id, content FROM record_tags
+        `SELECT record_id, tag_type, content FROM record_tags
          WHERE user_id = ? AND record_id IN (${placeholders})
          ORDER BY id ASC`
       )
       .all(userId, ...ids)
     for (const t of tags) {
-      const list = tagsByRecord[t.record_id] || (tagsByRecord[t.record_id] = [])
-      if (list.length < 3) list.push(String(t.content || '').slice(0, 20))
+      const content = String(t.content || '')
+      tagsByRecord[t.record_id] = {
+        tagType: t.tag_type,
+        content: content.slice(0, 20),
+        contentTruncated: content.length > 20
+      }
     }
   }
 
@@ -339,8 +343,7 @@ function getDays(userId, args) {
         item.note = note.slice(0, NOTE_PREVIEW)
         if (note.length > NOTE_PREVIEW) item.noteTruncated = true
       }
-      const ts = tagsByRecord[r.id]
-      if (ts && ts.length) item.tags = ts
+      if (tagsByRecord[r.id]) item.tag = tagsByRecord[r.id]
     }
     return item
   })
@@ -442,6 +445,10 @@ function getRecord(userId, args) {
   const item = { id: r.id, day: r.day, indexInDay, score: r.score, note: String(r.note || '') }
   if (r.original_score != null) item.originalScore = r.original_score
   if (r.adjusted_at) item.adjustedAt = r.adjusted_at
+  const tag = db
+    .prepare('SELECT tag_type, content FROM record_tags WHERE record_id = ? AND user_id = ?')
+    .get(r.id, userId)
+  if (tag) item.tag = { tagType: tag.tag_type, content: String(tag.content || '') }
   return { ok: true, item }
 }
 
@@ -809,25 +816,67 @@ function proposeTag(ctx, args) {
   const content = normText(args?.content, 500)
   if (!content) return { ok: false, reason: 'bad_args', hint: '标签内容需为 1-500 字的文本' }
 
-  const dup = db
-    .prepare('SELECT id FROM record_tags WHERE record_id = ? AND user_id = ? AND tag_type = ? AND content = ?')
-    .get(recordId, ctx.userId, tagType, content)
-  if (dup) {
-    return { ok: false, reason: 'already_exists', tagId: dup.id, hint: '这条记录已经有同样的标签了，不需要再提。' }
+  const existing = db
+    .prepare('SELECT id, tag_type, content, source FROM record_tags WHERE record_id = ? AND user_id = ?')
+    .get(recordId, ctx.userId)
+  if (existing) {
+    if (existing.source === 'user') {
+      return {
+        ok: false,
+        reason: 'user_tag_exists',
+        hint: '这颗球已经有用户手动添加的标签，AI 标签不能覆盖它。'
+      }
+    }
+    if (existing.tag_type === tagType && existing.content === content) {
+      return { ok: false, reason: 'already_exists', tagId: existing.id, hint: '这条记录已经有同样的标签了，不需要再提。' }
+    }
   }
 
   const recordIndex = db
     .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
     .get(ctx.userId, record.day, recordId).c
 
-  return insertProposal(ctx, 'tag', {
+  const payload = {
     recordId,
     recordDay: record.day,
     recordIndex,
     recordScore: record.score,
     tagType,
     content
-  })
+  }
+  const previousTag = existing ? { tagType: existing.tag_type, content: existing.content } : null
+  const action = existing ? 'update' : 'create'
+
+  // 同一颗球只保留一条待确认标签：用新内容替换旧的待确认提议
+  const pendings = db
+    .prepare(`SELECT id, payload FROM chat_proposals WHERE session_id = ? AND kind = 'tag' AND status = 'pending'`)
+    .all(ctx.sessionId)
+  for (const p of pendings) {
+    let parsed
+    try {
+      parsed = JSON.parse(p.payload)
+    } catch {
+      continue
+    }
+    if (Number(parsed?.recordId) !== recordId) continue
+    db.prepare('UPDATE chat_proposals SET payload = ?, created_at = ? WHERE id = ?').run(
+      JSON.stringify(payload),
+      new Date().toISOString(),
+      p.id
+    )
+    return {
+      ok: true,
+      proposalId: p.id,
+      status: 'pending',
+      replacedPrevious: true,
+      action,
+      previousTag,
+      hint: '已更新这颗球的待确认标签，会替换之前的内容。'
+    }
+  }
+
+  const result = insertProposal(ctx, 'tag', payload)
+  return { ...result, action, previousTag }
 }
 
 function proposeReport(ctx, args) {

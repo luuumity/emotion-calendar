@@ -343,6 +343,19 @@ const migrations = [
           ON chat_trace_events(session_id, turn_id, seq);
       `)
     }
+  },
+  {
+    version: 12,
+    // 一球一标签：每条记录只保留一个标签；已有重复时保留最新一条（id 最大）。
+    up() {
+      db.exec(`
+        DELETE FROM record_tags
+        WHERE id NOT IN (SELECT MAX(id) FROM record_tags GROUP BY record_id);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_record_tags_record_unique
+          ON record_tags(record_id);
+      `)
+    }
   }
 ]
 

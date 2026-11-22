@@ -3403,6 +3403,17 @@ p {
   color: var(--ink);
 }
 
+.chat-proposal-replace {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.chat-proposal-replace.blocked {
+  color: var(--coral);
+}
+
 .chat-proposal-toggle {
   display: inline-flex;
   align-items: center;

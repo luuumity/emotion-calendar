@@ -5,6 +5,7 @@ import { db } from '../db.js'
 
 const recordStmt = db.prepare('SELECT id, day, score FROM records WHERE id = ? AND user_id = ?')
 const indexStmt = db.prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
+const tagStmt = db.prepare('SELECT id, tag_type, content, source FROM record_tags WHERE record_id = ? AND user_id = ?')
 
 export function withLiveTagTarget(row, payload) {
   if (!payload || row.kind !== 'tag') return payload
@@ -15,11 +16,15 @@ export function withLiveTagTarget(row, payload) {
   if (!record) return { ...payload, recordMissing: true }
 
   const recordIndex = indexStmt.get(row.user_id, record.day, record.id).c
+  const current = tagStmt.get(recordId, row.user_id)
   return {
     ...payload,
     recordDay: record.day,
     recordIndex,
     recordScore: record.score,
-    recordMissing: false
+    recordMissing: false,
+    existingTag: current
+      ? { id: current.id, tagType: current.tag_type, content: current.content, source: current.source }
+      : null
   }
 }

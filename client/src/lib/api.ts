@@ -143,6 +143,12 @@ export type ChatProposal = {
     recordScore?: number
     recordMissing?: boolean
     tagType?: RecordTag['tagType']
+    existingTag?: {
+      id: number
+      tagType: RecordTag['tagType']
+      content: string
+      source: 'user' | 'agent'
+    } | null
     periodType?: 'week' | 'month'
     start?: string | null
     end?: string | null

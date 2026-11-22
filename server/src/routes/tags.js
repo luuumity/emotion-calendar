@@ -1,7 +1,7 @@
 // Record Tags CRUD
 // 附着在具体记录上的 AI 洞察/建议/模式/修正
 // 标签由 agent 提议 → 用户确认后写入；couple_visible 默认关
-// 支持批量（一条记录可能有多条标签）
+// 一球一标签：每条记录最多一条标签
 
 import { Router } from 'express'
 import { db } from '../db.js'
@@ -93,6 +93,8 @@ router.post('/', (req, res) => {
   if (!tagType) return res.status(400).json({ error: '标签类型必须是 insight/suggestion/pattern/correction 之一' })
   if (!content) return res.status(400).json({ error: '标签内容需为 1-500 字的文本' })
   if (!recordBelongsToUser(recordId, req.user.id)) return res.status(404).json({ error: '没有找到这颗扭蛋' })
+  const existing = db.prepare('SELECT id FROM record_tags WHERE record_id = ? AND user_id = ?').get(recordId, req.user.id)
+  if (existing) return res.status(409).json({ error: '每颗球最多只能有一个标签' })
 
   const source = toSource(req.body?.source)
   const sourceRefMessageId = toInt(req.body?.sourceRefMessageId)

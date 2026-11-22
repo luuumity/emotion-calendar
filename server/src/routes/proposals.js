@@ -156,10 +156,12 @@ function acceptTag(row, coupleVisible, override) {
     .prepare('SELECT COUNT(*) AS c FROM records WHERE user_id = ? AND day = ? AND id <= ?')
     .get(row.user_id, record.day, record.id).c
 
-  const dup = db
-    .prepare('SELECT id FROM record_tags WHERE record_id = ? AND tag_type = ? AND content = ?')
-    .get(recordId, tagType, content)
-  if (dup) return { error: '这条记录已经有相同内容的标签了', status: 409 }
+  const existing = db
+    .prepare('SELECT * FROM record_tags WHERE record_id = ? AND user_id = ?')
+    .get(recordId, row.user_id)
+  if (existing && existing.source === 'user') {
+    return { error: '这颗球已有你手动添加的标签，AI 标签不能覆盖它', status: 409 }
+  }
 
   const edited = content !== baseContent ? 1 : 0
   const finalPayload = JSON.stringify({
@@ -172,21 +174,37 @@ function acceptTag(row, coupleVisible, override) {
   const now = nowIso()
 
   return db.transaction(() => {
-    const info = db
-      .prepare(
-        `INSERT INTO record_tags (record_id, user_id, tag_type, content, source, source_ref_message_id, couple_visible, created_at)
-         VALUES (?, ?, ?, ?, 'agent', ?, ?, ?)`
-      )
-      .run(recordId, row.user_id, tagType, content, row.message_id, coupleVisible, now)
+    let tagRow
+    if (existing) {
+      // 一球一标签：已有 AI 标签时原地更新，保留标签 id
+      db.prepare(
+        `UPDATE record_tags
+         SET tag_type = ?, content = ?, source = 'agent', source_ref_message_id = ?, couple_visible = ?
+         WHERE id = ?`
+      ).run(tagType, content, row.message_id, coupleVisible, existing.id)
+      tagRow = db.prepare('SELECT * FROM record_tags WHERE id = ?').get(existing.id)
+    } else {
+      const info = db
+        .prepare(
+          `INSERT INTO record_tags (record_id, user_id, tag_type, content, source, source_ref_message_id, couple_visible, created_at)
+           VALUES (?, ?, ?, ?, 'agent', ?, ?, ?)`
+        )
+        .run(recordId, row.user_id, tagType, content, row.message_id, coupleVisible, now)
+      tagRow = db.prepare('SELECT * FROM record_tags WHERE id = ?').get(info.lastInsertRowid)
+    }
     const changed = db
       .prepare(
         `UPDATE chat_proposals
          SET status = 'accepted', couple_visible = ?, result_ref_id = ?, final_payload = ?, edited = ?, decided_at = ?
          WHERE id = ? AND status = 'pending'`
       )
-      .run(coupleVisible, info.lastInsertRowid, finalPayload, edited, now, row.id)
+      .run(coupleVisible, tagRow.id, finalPayload, edited, now, row.id)
     if (!changed.changes) return { error: '这条提议已经处理过了', status: 409 }
-    return { tag: tagView(db.prepare('SELECT * FROM record_tags WHERE id = ?').get(info.lastInsertRowid)) }
+    return {
+      action: existing ? 'update' : 'create',
+      previousTag: existing ? { tagType: existing.tag_type, content: existing.content } : null,
+      tag: tagView(tagRow)
+    }
   })()
 }
 

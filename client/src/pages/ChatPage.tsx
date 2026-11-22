@@ -584,6 +584,7 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
     if (!pending) return null
     if (item.kind === 'fact' || item.kind === 'tag') {
       if (item.kind === 'tag' && p?.recordMissing) return '这颗球已被删除，无法采纳'
+      if (item.kind === 'tag' && p?.existingTag?.source === 'user') return '这颗球已有你手动添加的标签，AI 标签无法覆盖'
       if (!draft.trim()) return '内容不能为空'
       if (draft.trim().length > 500) return '内容不能超过 500 字'
       return null
@@ -713,6 +714,13 @@ function ProposalCard({ proposal }: { proposal: ChatProposal }) {
           <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
           对另一半可见
         </label>
+      )}
+      {pending && item.kind === 'tag' && p?.existingTag && (
+        <p className={'chat-proposal-replace' + (p.existingTag.source === 'user' ? ' blocked' : '')}>
+          {p.existingTag.source === 'user' ? '已有你手动添加的标签，AI 标签无法覆盖：' : '将替换现有标签：'}
+          {TAG_TYPE_LABEL[p.existingTag.tagType] || p.existingTag.tagType} ·{' '}
+          {p.existingTag.content.length > 60 ? `${p.existingTag.content.slice(0, 60)}…` : p.existingTag.content}
+        </p>
       )}
       {pending ? (
         <div className="chat-proposal-actions">
