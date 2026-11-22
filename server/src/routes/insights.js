@@ -117,6 +117,11 @@ router.delete('/:id', (req, res) => {
   }
 
   db.prepare('DELETE FROM insights WHERE id = ?').run(id)
+  // 双人报告是增量分析：删掉报告后水位和摘要没有回收，下次会误以为旧记录已分析过。
+  // 简单安全的做法是删除任意一份双人报告时重置该对情侣的记忆，下次重新全量。
+  if (row.scope === 'couple') {
+    updateCoupleMemory(row.couple_key, '', '')
+  }
   res.json({ ok: true })
 })
 

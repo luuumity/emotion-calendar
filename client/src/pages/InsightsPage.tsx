@@ -56,6 +56,32 @@ function formatTime(iso: string) {
   })
 }
 
+function Toggle({
+  checked,
+  disabled = false,
+  label,
+  onChange
+}: {
+  checked: boolean
+  disabled?: boolean
+  label: string
+  onChange: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={'switch' + (checked ? ' on' : '')}
+      disabled={disabled}
+      onClick={onChange}
+    >
+      <span className="switch-knob" />
+    </button>
+  )
+}
+
 function summarize(text: string, n = 120) {
   if (!text) return ''
   const t = text
@@ -246,13 +272,6 @@ export function InsightsPage() {
     }
   }
 
-  function autoNextText(info: { weekly: boolean; monthly: boolean }) {
-    const parts: string[] = []
-    if (info.weekly) parts.push('每周一 03:00')
-    if (info.monthly) parts.push('每月 1 日 03:00')
-    return parts.length ? parts.join(' · ') : '未开启'
-  }
-
   async function handleDelete(insight: Insight) {
     setDeleting(true)
     try {
@@ -291,27 +310,34 @@ export function InsightsPage() {
 
       {autoInfo && !autoInfo.asked && (
         <div className="insight-auto-ask">
-          <div>
+          <div className="insight-auto-ask-head">
             <strong>开启定时报告？</strong>
-            <p>
-              周报每周一 03:00 后生成上一完整周；月报每月 1 日 03:00 后生成上一完整月。可以只开一个，也可以都开。
-              开启后会先补最近一个完整周期。
-            </p>
-            <div className="insight-auto-choices">
-              <button
-                type="button"
-                className={'chip' + (autoDraft.weekly ? ' active' : '')}
-                onClick={() => setAutoDraft((v) => ({ ...v, weekly: !v.weekly }))}
-              >
-                周报
-              </button>
-              <button
-                type="button"
-                className={'chip' + (autoDraft.monthly ? ' active' : '')}
-                onClick={() => setAutoDraft((v) => ({ ...v, monthly: !v.monthly }))}
-              >
-                月报
-              </button>
+            <p>可以只开一个，也可以都开。开启后会先补最近一个完整周期。</p>
+          </div>
+          <div className="insight-auto-rows">
+            <div className="insight-auto-row">
+              <div className="insight-auto-row-main">
+                <strong>周报</strong>
+                <small>每周一 03:00 后生成上一完整周</small>
+              </div>
+              <Toggle
+                checked={autoDraft.weekly}
+                disabled={autoBusy}
+                label="开启周报"
+                onChange={() => setAutoDraft((v) => ({ ...v, weekly: !v.weekly }))}
+              />
+            </div>
+            <div className="insight-auto-row">
+              <div className="insight-auto-row-main">
+                <strong>月报</strong>
+                <small>每月 1 日 03:00 后生成上一完整月</small>
+              </div>
+              <Toggle
+                checked={autoDraft.monthly}
+                disabled={autoBusy}
+                label="开启月报"
+                onChange={() => setAutoDraft((v) => ({ ...v, monthly: !v.monthly }))}
+              />
             </div>
           </div>
           <div className="insight-auto-actions">
@@ -332,26 +358,35 @@ export function InsightsPage() {
 
       {autoInfo && autoInfo.asked && (
         <div className="insight-auto-bar">
-          <strong>定时订阅</strong>
-          <div className="insight-auto-choices">
-            <button
-              type="button"
-              className={'chip' + (autoInfo.weekly ? ' active' : '')}
-              disabled={autoBusy}
-              onClick={() => answerAuto(!autoInfo.weekly, autoInfo.monthly)}
-            >
-              周报
-            </button>
-            <button
-              type="button"
-              className={'chip' + (autoInfo.monthly ? ' active' : '')}
-              disabled={autoBusy}
-              onClick={() => answerAuto(autoInfo.weekly, !autoInfo.monthly)}
-            >
-              月报
-            </button>
+          <div className="insight-auto-bar-head">
+            <strong>定时订阅</strong>
           </div>
-          <small>{autoNextText(autoInfo)}</small>
+          <div className="insight-auto-rows">
+            <div className="insight-auto-row">
+              <div className="insight-auto-row-main">
+                <strong>周报</strong>
+                <small>每周一 03:00 后生成上一完整周</small>
+              </div>
+              <Toggle
+                checked={autoInfo.weekly}
+                disabled={autoBusy}
+                label="开启周报"
+                onChange={() => answerAuto(!autoInfo.weekly, autoInfo.monthly)}
+              />
+            </div>
+            <div className="insight-auto-row">
+              <div className="insight-auto-row-main">
+                <strong>月报</strong>
+                <small>每月 1 日 03:00 后生成上一完整月</small>
+              </div>
+              <Toggle
+                checked={autoInfo.monthly}
+                disabled={autoBusy}
+                label="开启月报"
+                onChange={() => answerAuto(autoInfo.weekly, !autoInfo.monthly)}
+              />
+            </div>
+          </div>
         </div>
       )}
 
