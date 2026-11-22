@@ -92,7 +92,7 @@ function periodDayCount(periodStart, periodEnd) {
 function buildSummaryBlock(records) {
   const summary = buildScoreSummary(records)
   if (!summary.balls) return '本周期没有记录。'
-  const lines = [`本周期覆盖 ${summary.days} 天，共 ${summary.balls} 颗球。`]
+  const lines = [`本周期有 ${summary.days} 天记录，共 ${summary.balls} 颗球。`]
   lines.push(`档位分布：${summary.distributionText}`)
   lines.push(`整体跨度：${summary.rangeText}`)
   const daily = buildDailyBands(records)
@@ -142,7 +142,7 @@ ${outline}
 - 情绪强弱优先用七档感受词：很糟、有点低落、偏凉、一般、还不错、挺开心、很幸福
 - 分数不是完全不能用，但只作为辅助：只在引用用户原话、或确需精确对照时出现；不要用分数做段落主线，不要连续罗列数字、区间或百分比
 - 不写平均分、最高分、最低分，改用"多数时候""偶尔""从…到…"这类表达
-- 样本量用"天"和"颗球"，例如"这周你记了 4 天，投了 40 颗球"，不要写"40 条记录"
+- 样本量用"天"和"颗球"，例如"这周有 4 天记录、共 40 颗球"，不要写"40 条记录"
 - 同一天有多颗球时，把它们当作具体事件带来的波动，不要用日均分抹平
 - 回读到旧报告、旧标签或历史摘要里的分数时，转成感受词再引用
 - 如果记录很少（< 3 天），坦诚说"样本还少，我们下次再多一点数据"
