@@ -71,29 +71,9 @@ export function describeRecordScore(score, originalScore, adjustedAt) {
 }
 
 /**
- * 统计值：平均分、日均分这类可能带小数的值。
- * 距档位边界不超过 tolerance 时，不硬贴标签，改用区间描述。
+ * 统计值不直接贴单一档位：报告只用档位分布和区间描述，
+ * 平均分等可能带小数的值不进入输出，避免把 68.7 硬说成某一档。
  */
-export function describeApproxScore(score, tolerance = 3) {
-  const n = toScore(score)
-  if (n === null) return '未记录'
-  const band = bandOf(n)
-  const prev = SCORE_BANDS[band.index - 1]
-  const next = SCORE_BANDS[band.index + 1]
-  const lowDistance = n - band.min
-  const highDistance = band.max - n
-
-  if (lowDistance <= tolerance && highDistance <= tolerance) {
-    return `大致在『${band.label}』一带`
-  }
-  if (highDistance <= tolerance && next) {
-    return `介于『${band.label}』和『${next.label}』之间`
-  }
-  if (lowDistance <= tolerance && prev) {
-    return `介于『${prev.label}』和『${band.label}』之间`
-  }
-  return `大致在『${band.label}』一带`
-}
 
 /** 一段区间：同档 / 相邻档 / 跨多档 */
 export function describeRange(min, max) {
