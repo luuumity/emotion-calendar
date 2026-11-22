@@ -253,8 +253,9 @@ export function buildProposalNotice(sessionId, userId, since) {
   ].join('\n')
 }
 
-// 纯防失控的安全阈值，不是产品级限制
-const MAX_TOOL_STEPS = 8
+// 纯防失控的安全阈值，不是产品级限制。
+// 15 轮用于覆盖“统计 → 翻页 → 取详情”这类组合查询；用尽后仍会强制收尾一次。
+const MAX_TOOL_STEPS = 15
 
 function mergeUsage(total, usage) {
   if (!usage) return total
