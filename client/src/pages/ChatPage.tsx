@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type ChatSession, type ChatMessage, type ChatProposal } from '../lib/api'
 
@@ -77,10 +77,15 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null)
   const [hint, setHint] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
+  const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null)
 
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const hintTimer = useRef<number | null>(null)
+  const longPressTimer = useRef<number | null>(null)
+  const longPressStart = useRef<{ x: number; y: number } | null>(null)
+  const longPressFired = useRef<{ id: number; x: number; y: number } | null>(null)
+  const suppressItemClick = useRef(false)
 
   const links = useMemo(() => extractLinks(input), [input])
 
@@ -93,6 +98,7 @@ export function ChatPage() {
   useEffect(() => {
     return () => {
       if (hintTimer.current) window.clearTimeout(hintTimer.current)
+      if (longPressTimer.current) window.clearTimeout(longPressTimer.current)
     }
   }, [])
 
@@ -143,8 +149,7 @@ export function ChatPage() {
     }
   }
 
-  async function deleteSession(id: number, e?: React.MouseEvent) {
-    e?.stopPropagation?.()
+  async function deleteSession(id: number) {
     setPendingDeleteId(null)
     try {
       await api.deleteChatSession(id)
@@ -162,6 +167,52 @@ export function ChatPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '删除失败')
     }
+  }
+
+  function clearLongPress() {
+    if (longPressTimer.current) window.clearTimeout(longPressTimer.current)
+    longPressTimer.current = null
+    longPressStart.current = null
+    longPressFired.current = null
+  }
+
+  function openSessionMenu(id: number, x: number, y: number) {
+    const MENU_W = 160
+    const MENU_H = 48
+    setMenuFor({
+      id,
+      x: Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - MENU_H - 8))
+    })
+  }
+
+  // 长按 480ms 记为触发；松手后再弹菜单，避免菜单刚好出现在手指下方被误点
+  function startLongPress(e: ReactPointerEvent<HTMLDivElement>, id: number) {
+    if (e.button !== 0) return
+    const x = e.clientX
+    const y = e.clientY
+    suppressItemClick.current = false
+    clearLongPress()
+    longPressStart.current = { x, y }
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = null
+      longPressStart.current = null
+      longPressFired.current = { id, x, y }
+    }, 480)
+  }
+
+  function moveLongPress(e: ReactPointerEvent<HTMLDivElement>) {
+    const start = longPressStart.current
+    if (!start || !longPressTimer.current) return
+    if (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8) clearLongPress()
+  }
+
+  function endLongPress() {
+    const fired = longPressFired.current
+    clearLongPress()
+    if (!fired) return
+    suppressItemClick.current = true
+    openSessionMenu(fired.id, fired.x, fired.y)
   }
 
   // 初始加载：拉列表，如果没有任何 session 就自动建一个空的新会话
@@ -240,6 +291,10 @@ export function ChatPage() {
 
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
   const nonEmptySessions = useMemo(() => sessions.filter((s) => s.messageCount > 0), [sessions])
+  const pendingDelete = useMemo(
+    () => sessions.find((s) => s.id === pendingDeleteId) || null,
+    [sessions, pendingDeleteId]
+  )
 
   // 纯按钮触发发送。回车/Shift+回车都换行，符合移动端输入法直觉
   // （之前保留了 Shift+Enter=换行，Enter=发送的桌面规则；现在统一：点按钮才发）
@@ -289,7 +344,21 @@ export function ChatPage() {
                 <div
                   key={s.id}
                   className={'chat-session-item ' + (s.id === activeId ? 'active' : '')}
+                  onPointerDown={(e) => startLongPress(e, s.id)}
+                  onPointerMove={moveLongPress}
+                  onPointerUp={endLongPress}
+                  onPointerCancel={clearLongPress}
+                  onPointerLeave={clearLongPress}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    clearLongPress()
+                    openSessionMenu(s.id, e.clientX, e.clientY)
+                  }}
                   onClick={() => {
+                    if (suppressItemClick.current) {
+                      suppressItemClick.current = false
+                      return
+                    }
                     selectSession(s.id)
                     setSidebarOpen(false)
                   }}
@@ -298,40 +367,6 @@ export function ChatPage() {
                     <strong>{s.title}</strong>
                     <span>{formatTime(s.updatedAt)}</span>
                   </div>
-                  {pendingDeleteId === s.id ? (
-                    <div className="chat-session-confirm" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className="chat-session-confirm-yes"
-                        onClick={(e) => deleteSession(s.id, e)}
-                      >
-                        删除
-                      </button>
-                      <button
-                        type="button"
-                        className="chat-session-confirm-no"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setPendingDeleteId(null)
-                        }}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="chat-session-del"
-                      title="删除这个对话"
-                      aria-label="删除这个对话"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setPendingDeleteId(s.id)
-                      }}
-                    >
-                      🗑
-                    </button>
-                  )}
                 </div>
               ))
             )}
@@ -426,6 +461,56 @@ export function ChatPage() {
           )}
         </main>
       </div>
+
+      {menuFor && (
+        <>
+          <div className="chat-session-menu-backdrop" onClick={() => setMenuFor(null)} aria-hidden />
+          <div
+            className="chat-session-menu"
+            style={{ left: menuFor.x, top: menuFor.y }}
+            role="menu"
+            aria-label="会话操作"
+          >
+            <button
+              type="button"
+              className="chat-session-menu-item"
+              role="menuitem"
+              onClick={() => {
+                const id = menuFor.id
+                setMenuFor(null)
+                setPendingDeleteId(id)
+              }}
+            >
+              删除该会话
+            </button>
+          </div>
+        </>
+      )}
+
+      {pendingDelete && (
+        <div className="chat-dialog-backdrop" onClick={() => setPendingDeleteId(null)}>
+          <div
+            className="chat-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="确认删除会话"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>删除该会话？</h3>
+            <p>
+              「{pendingDelete.title}」里的所有消息会一起删除，且无法恢复。
+            </p>
+            <div className="chat-dialog-actions">
+              <button type="button" className="ghost-btn small" onClick={() => setPendingDeleteId(null)}>
+                取消
+              </button>
+              <button type="button" className="chat-dialog-danger" onClick={() => deleteSession(pendingDelete.id)}>
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
