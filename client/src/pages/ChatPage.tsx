@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, type ChatSession, type ChatMessage, type ChatProposal } from '../lib/api'
+import { Markdown } from '../components/Markdown'
 
 function formatTime(iso: string) {
   const d = new Date(iso)
@@ -521,9 +522,11 @@ function Bubble({ message }: { message: ChatMessage }) {
   return (
     <>
       <div className={'chat-bubble ' + (isUser ? 'user' : 'assistant')}>
-        {message.content.split('\n').map((line, i) => (
-          <p key={i}>{line || '\u00A0'}</p>
-        ))}
+        {isUser ? (
+          message.content.split('\n').map((line, i) => <p key={i}>{line || '\u00A0'}</p>)
+        ) : (
+          <Markdown className="markdown-chat" content={message.content} />
+        )}
         <span className="chat-bubble-time">{formatTime(message.createdAt)}</span>
       </div>
       {proposals.length > 0 && (

@@ -2938,7 +2938,7 @@ p {
   gap: 8px;
 }
 
-.insight-content p {
+.insight-content > p {
   font-size: 13.5px;
   line-height: 1.8;
   color: var(--ink);
@@ -3282,7 +3282,7 @@ p {
   word-break: break-word;
 }
 
-.chat-bubble p {
+.chat-bubble.user p {
   white-space: pre-wrap;
 }
 
@@ -3946,4 +3946,159 @@ a.chat-link-chip:hover {
   .score-editor-row:last-child .primary-btn {
     flex: 1;
   }
+}
+
+/* ============ Markdown（对话 / 报告共用） ============ */
+
+.markdown {
+  word-break: break-word;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0 0 0.6em;
+  line-height: 1.75;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 0.9em 0 0.4em;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+.markdown h1 {
+  font-size: 1.2em;
+}
+
+.markdown h2 {
+  font-size: 1.1em;
+}
+
+.markdown h3 {
+  font-size: 1.02em;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 0.7em;
+  padding-left: 1.25em;
+  display: grid;
+  gap: 0.2em;
+}
+
+.markdown li {
+  line-height: 1.7;
+}
+
+.markdown li > p {
+  margin: 0;
+}
+
+.markdown strong {
+  font-weight: 700;
+}
+
+.markdown em {
+  font-style: italic;
+}
+
+.markdown a {
+  color: var(--coral-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown blockquote {
+  margin: 0.6em 0;
+  padding: 0.35em 0.8em;
+  border-left: 3px solid var(--line-strong);
+  color: var(--ink-soft);
+}
+
+.markdown code {
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: rgba(47, 42, 37, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.markdown pre {
+  margin: 0.6em 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(47, 42, 37, 0.06);
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px dashed var(--line);
+}
+
+.markdown table {
+  width: 100%;
+  margin: 0.6em 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.markdown th {
+  background: rgba(47, 42, 37, 0.04);
+  font-weight: 600;
+}
+
+/* 对话：紧凑，避免气泡里出现大段空白 */
+.markdown-chat {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.markdown-chat p {
+  margin-bottom: 0.5em;
+}
+
+.markdown-chat h1,
+.markdown-chat h2,
+.markdown-chat h3 {
+  margin: 0.7em 0 0.3em;
+}
+
+/* 报告：更适合长文阅读 */
+.markdown-report {
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--ink);
+}
+
+.markdown-report p {
+  margin-bottom: 0.7em;
+}
+
+.markdown-report h1,
+.markdown-report h2,
+.markdown-report h3 {
+  color: var(--ink);
 }

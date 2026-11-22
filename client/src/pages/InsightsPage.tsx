@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type Insight, type AccessInfo, type Granted, type ColdStartInfo } from '../lib/api'
+import { Markdown } from '../components/Markdown'
 
 type Tab = 'single' | 'couple'
 type PeriodType = 'week' | 'month' | 'manual'
@@ -520,9 +521,7 @@ function InsightCard({
 
       {expanded ? (
         <div className="insight-content">
-          {insight.content.split('\n').map((line, i) => (
-            <p key={i}>{line || '\u00A0'}</p>
-          ))}
+          <Markdown className="markdown-report" content={insight.content} />
 
           <div className="insight-delete-row">
             {confirming ? (
