@@ -86,6 +86,7 @@ export function InsightsPage() {
   const [access, setAccess] = useState<AccessInfo | null>(null)
   const [coldStart, setColdStart] = useState<ColdStartInfo | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [coldStartConfirm, setColdStartConfirm] = useState(false)
   const [autoInfo, setAutoInfo] = useState<{ enabled: boolean; asked: boolean } | null>(null)
   const [autoBusy, setAutoBusy] = useState(false)
@@ -156,11 +157,15 @@ export function InsightsPage() {
     setGenerateErr(null)
     setGenerateSuccess(null)
 
-    if (coldStart?.needed) {
+    if (loading || deleting || coldStart === null) {
+      setGenerateErr('正在刷新报告状态，请稍候再试')
+      return
+    }
+    if (coldStart.needed) {
       setColdStartConfirm(true)
       return
     }
-    if (coldStart && !coldStart.hasRecords) {
+    if (!coldStart.hasRecords) {
       setGenerateErr('还没有任何记录，先记录几天再来生成报告')
       return
     }
@@ -206,9 +211,14 @@ export function InsightsPage() {
   }
 
   async function handleDelete(insight: Insight) {
-    await api.deleteInsight(insight.id)
-    if (expandedId === insight.id) setExpandedId(null)
-    await load()
+    setDeleting(true)
+    try {
+      await api.deleteInsight(insight.id)
+      if (expandedId === insight.id) setExpandedId(null)
+      await load()
+    } finally {
+      setDeleting(false)
+    }
   }
 
   async function handleGenerateCouple(partnerId: number) {
@@ -280,7 +290,7 @@ export function InsightsPage() {
             <div className="insights-actions-main">
               {coldStart?.needed ? (
                 <p className="insights-actions-hint">
-                  这是你的第一份单人报告，会基于从 {coldStart.start} 到 {coldStart.end} 的全部{' '}
+                  你现在还没有任何单人报告。这是你的第一份报告，会基于从 {coldStart.start} 到 {coldStart.end} 的全部{' '}
                   {coldStart.recordCount} 条记录生成全量分析。生成之后就可以按本周 / 本月 / 自定义继续。
                 </p>
               ) : (
@@ -338,7 +348,7 @@ export function InsightsPage() {
               type="button"
               className="primary-btn"
               onClick={handleGenerateSingle}
-              disabled={generating || (coldStart !== null && !coldStart.hasRecords)}
+              disabled={generating || loading || deleting || (coldStart !== null && !coldStart.hasRecords)}
             >
               {generating
                 ? '生成中…'

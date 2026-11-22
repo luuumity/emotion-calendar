@@ -300,6 +300,13 @@ export async function generateSingleInsightSync({
     }
   )
 
+  // 模型偶尔会只返回思考内容或空正文，不能把空报告写进库
+  if (!result.content || !result.content.trim()) {
+    const err = new Error('AI 没有返回报告内容，请重试')
+    err.code = 'EMPTY_CONTENT'
+    throw err
+  }
+
   // 覆盖半周报告：生成成功后再 UPDATE，失败时旧报告保留
   if (existing && force) {
     db.prepare(

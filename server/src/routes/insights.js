@@ -137,6 +137,7 @@ router.post('/single/generate', async (req, res) => {
     res.status(result.existing ? 200 : 201).json(result)
   } catch (err) {
     if (err.code === 'NO_RECORDS') return res.status(400).json({ error: err.message })
+    if (err.code === 'EMPTY_CONTENT') return res.status(502).json({ error: err.message })
     console.error('[insights] 单人报告生成失败:', err.message)
     res.status(500).json({ error: '生成失败，请稍后再试' })
   }
