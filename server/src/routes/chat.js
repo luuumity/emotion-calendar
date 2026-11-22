@@ -266,6 +266,36 @@ function mergeUsage(total, usage) {
   }
 }
 
+function classifyToolOutput(output) {
+  try {
+    const data = JSON.parse(output)
+    if (data && data.ok === false) {
+      if (data.reason === 'duplicate_call') return { status: 'duplicate', error: data.hint || data.reason }
+      if (data.reason === 'result_too_large') return { status: 'too_large', error: data.hint || data.reason }
+      return { status: 'error', error: data.hint || data.reason || 'tool_error' }
+    }
+  } catch {
+    // 非 JSON 输出按成功处理
+  }
+  return { status: 'ok' }
+}
+
+/**
+ * 记录完整工具调用轨迹。只写库，不影响本轮消息或后续历史。
+ * 落库失败不阻断对话，避免审计表问题影响主流程。
+ */
+function recordTraceEvent(ctx, seq, type, payload) {
+  if (!ctx.turnId) return
+  try {
+    db.prepare(
+      `INSERT INTO chat_trace_events (session_id, user_id, turn_id, seq, type, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(ctx.sessionId, ctx.userId, ctx.turnId, seq, type, JSON.stringify(payload), nowIso())
+  } catch (err) {
+    console.error('[chat] 工具轨迹落库失败:', err.message)
+  }
+}
+
 /**
  * 工具循环：模型可调用 get_days / get_tags 按需取数。
  * 相同参数的重复调用直接拒绝，避免原地打转。
@@ -276,6 +306,7 @@ async function runWithTools(baseMessages, ctx) {
   let usage = {}
   let lastPromptTokens = 0
   let lastPromptChars = 0
+  let traceSeq = 0
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
     lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
@@ -289,11 +320,22 @@ async function runWithTools(baseMessages, ctx) {
     // 思考模式下，带 tool_calls 的 assistant 消息必须把 reasoning_content 原样带回去
     if (result.message.reasoning_content) assistantMsg.reasoning_content = result.message.reasoning_content
     work.push(assistantMsg)
+    recordTraceEvent(ctx, ++traceSeq, 'assistant_tool_calls', {
+      content: assistantMsg.content,
+      tool_calls: result.toolCalls,
+      reasoning_content: result.message.reasoning_content ?? null
+    })
 
     for (const call of result.toolCalls) {
       const name = call.function?.name
       const rawArgs = call.function?.arguments || '{}'
       const key = `${name}:${rawArgs}`
+      let args = {}
+      try {
+        args = JSON.parse(rawArgs)
+      } catch {
+        args = {}
+      }
 
       let output
       if (seen.has(key)) {
@@ -304,14 +346,19 @@ async function runWithTools(baseMessages, ctx) {
         })
       } else {
         seen.add(key)
-        let args = {}
-        try {
-          args = JSON.parse(rawArgs)
-        } catch {
-          args = {}
-        }
         output = executeTool(name, args, ctx)
       }
+
+      const info = classifyToolOutput(output)
+      recordTraceEvent(ctx, ++traceSeq, 'tool_result', {
+        tool_call_id: call.id,
+        name,
+        raw_args: rawArgs,
+        args,
+        output,
+        status: info.status,
+        error: info.error || null
+      })
 
       work.push({ role: 'tool', tool_call_id: call.id, content: output })
     }
@@ -413,7 +460,12 @@ router.post('/sessions/:id/messages', async (req, res) => {
   const run = { proposalIds: [], reportCount: 0 }
 
   try {
-    const result = await runWithTools(messages, { userId: req.user.id, sessionId: id, run })
+    const result = await runWithTools(messages, {
+      userId: req.user.id,
+      sessionId: id,
+      turnId: userInfo.lastInsertRowid,
+      run
+    })
 
     // 6. 存 assistant 回复（模型只提议时可能没有正文，给一句兜底）
     const assistantText = result.content || (run.proposalIds.length ? '我整理了几条建议，等你确认。' : '')

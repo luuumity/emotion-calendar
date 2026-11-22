@@ -77,3 +77,32 @@
 - 定时报告：**仍未实现**，没有 `sweep-insights.mjs`，也没有“报告定时”设置入口。本次已把 `getSingleColdStartInfo` 和 `generateSingleInsightSync` 从 `routes/insights.js` 导出，未来定时脚本可直接 import 共享函数，从而自动继承“首份全量”的口径。
 - 测试：`tools.js` 语义自测 21 项通过；冷启动 API 自测通过（无记录 400、首份强制 manual 全量、第二份恢复 week）；客户端 `tsc --noEmit && vite build` 通过。
 
+## 八、跨轮工具轨迹与压缩（2026-11-22 讨论，待验证）
+
+### 现象
+- 真实会话 13：第一轮最后一次调用 14,301 字符，第二轮 6,638 字符；第二轮只继承了 54 + 515 = 569 字的问答，约 8k 字符的工具过程没有进入下一轮。
+- 第二轮重新调了一次统计核对数字，并承认上一轮“最长记录”的判断基于截断摘要，无法准确接续。
+
+### 业界参考
+- OpenAI Threads / Conversations、Responses `previous_response_id`：服务端保存完整消息与工具项，并按上下文截断。
+- Anthropic：`tool-result clearing` 保留“调用发生过”的记录，丢弃可重取的结果；长任务用 compaction；`just-in-time` 只保留轻量标识符。
+- Vercel AI SDK：`UIMessage` 持久化完整 tool calls / results，`ModelMessage` 是发给模型的精简视图。
+- LangGraph：checkpointer 持久化完整 state，但由调用模型的节点决定注入多少。
+- Letta / MemGPT：core memory 常驻 + archival memory 外部检索。
+- 《The Complexity Trap》：简单 observation masking 的成本约为 LLM 摘要的一半，效果相当。
+
+### 本轮决定
+- 先只做**完整调用链落库**：新增 `chat_trace_events`，记录每轮的 `assistant_tool_calls` 和 `tool_result`，包含 tool_calls、reasoning_content、args、完整 output、status。
+- 暂不改变 history 构建、压缩、提示词；暂不注入查询日志。
+- 目的：先在真实会话里观察完整轨迹，再决定查询日志怎么组织。
+
+### 后续候选
+- 方案 A：回放完整 `user → assistant(tool_calls) → tool(占位) → ... → assistant` 结构。
+- 方案 B：每轮压成一条查询日志，以 `system` 注入；最近 3 轮默认保留，更早折叠成索引。
+- 倾向 B：避免 `tool_call_id` 配对和 `reasoning_content` 的跨轮协议问题；日志字段至少含工具名、入参、status、returned、nextOffset、关键 ID。
+- 压缩：日志独立存、独立取，不依赖 `summary_until_id`；文本压缩继续只处理 user/assistant。
+
+### 待验证
+- 规则生成的查询日志是否真的能让 Agent 在追问时更准，而不是增加噪声。
+- 日志窗口、老日志索引、与压缩摘要的关系。
+

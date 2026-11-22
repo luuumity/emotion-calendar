@@ -322,6 +322,27 @@ const migrations = [
           WHERE scope = 'single' AND period_type = 'manual';
       `)
     }
+  },
+  {
+    version: 11,
+    // 完整工具调用轨迹：先只落库，不改历史、压缩和提示词。
+    // turn_id 指向本轮 user 消息；seq 保证同一轮内的消息顺序。
+    up() {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_trace_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          turn_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+          seq INTEGER NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('assistant_tool_calls', 'tool_result')),
+          payload TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_trace_session_turn
+          ON chat_trace_events(session_id, turn_id, seq);
+      `)
+    }
   }
 ]
 
