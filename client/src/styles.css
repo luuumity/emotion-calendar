@@ -2669,6 +2669,42 @@ p {
 
 /* ============ AI 分析页（Insights） ============ */
 
+.insight-auto-ask {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.insight-auto-ask strong {
+  font-size: 15px;
+}
+
+.insight-auto-ask p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.insight-auto-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .insight-auto-ask {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .insights-tabs {
   display: inline-flex;
   align-items: center;

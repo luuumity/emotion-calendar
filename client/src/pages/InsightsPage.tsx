@@ -86,6 +86,8 @@ export function InsightsPage() {
   const [coldStart, setColdStart] = useState<ColdStartInfo | null>(null)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [coldStartConfirm, setColdStartConfirm] = useState(false)
+  const [autoInfo, setAutoInfo] = useState<{ enabled: boolean; asked: boolean } | null>(null)
+  const [autoBusy, setAutoBusy] = useState(false)
 
   const [generating, setGenerating] = useState(false)
   const [generateErr, setGenerateErr] = useState<string | null>(null)
@@ -101,10 +103,11 @@ export function InsightsPage() {
     setLoading(true)
     setError(null)
     try {
-      const [ins, acc] = await Promise.all([api.insights(), api.access()])
+      const [ins, acc, auto] = await Promise.all([api.insights(), api.access(), api.insightAuto()])
       setInsights(ins.insights)
       setColdStart(ins.coldStart)
       setAccess(acc)
+      setAutoInfo(auto)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -189,6 +192,18 @@ export function InsightsPage() {
     })
   }
 
+  async function answerAuto(enabled: boolean) {
+    setAutoBusy(true)
+    try {
+      const res = await api.setInsightAuto(enabled)
+      setAutoInfo({ enabled: res.enabled, asked: res.asked })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '设置失败')
+    } finally {
+      setAutoBusy(false)
+    }
+  }
+
   async function handleDelete(insight: Insight) {
     await api.deleteInsight(insight.id)
     if (expandedId === insight.id) setExpandedId(null)
@@ -219,6 +234,23 @@ export function InsightsPage() {
           <p className="sub">把你的情绪日记交给 Persona Agent，让它用你的 fact、标签和过往记录，写出一份有温度的报告。</p>
         </div>
       </div>
+
+      {autoInfo && !autoInfo.asked && (
+        <div className="insight-auto-ask">
+          <div>
+            <strong>开启每周自动报告？</strong>
+            <p>每周一 03:00 后，自动为上一完整周生成一份单人报告；该周少于 3 条记录时跳过。</p>
+          </div>
+          <div className="insight-auto-actions">
+            <button type="button" className="primary-btn small" disabled={autoBusy} onClick={() => answerAuto(true)}>
+              开启
+            </button>
+            <button type="button" className="ghost-btn small" disabled={autoBusy} onClick={() => answerAuto(false)}>
+              暂不
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="insights-tabs">
         <button

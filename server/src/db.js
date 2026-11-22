@@ -356,6 +356,17 @@ const migrations = [
           ON record_tags(record_id);
       `)
     }
+  },
+  {
+    version: 13,
+    // 定时单人周报：三态开关（NULL 未询问 / 0 关 / 1 开）+ 失败重试记账
+    up() {
+      db.exec(`
+        ALTER TABLE users ADD COLUMN auto_insight_enabled INTEGER;
+        ALTER TABLE users ADD COLUMN auto_insight_fail_week TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN auto_insight_fail_count INTEGER NOT NULL DEFAULT 0;
+      `)
+    }
   }
 ]
 

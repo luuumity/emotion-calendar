@@ -14,6 +14,7 @@ import insightsRoutes from './routes/insights.js'
 import chatRoutes from './routes/chat.js'
 import proposalRoutes from './routes/proposals.js'
 import { startReminderScheduler } from './push.js'
+import { startInsightScheduler } from './lib/insight-scheduler.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -64,4 +65,5 @@ app.use((err, _req, res, _next) => {
 app.listen(port, host, () => {
   console.log(`emotion-calendar server listening on http://${host}:${port}`)
   startReminderScheduler()
+  startInsightScheduler()
 })

@@ -254,6 +254,12 @@ export const api = {
 
   // ---- insights ----
   insights: () => request<{ insights: Insight[]; coldStart: ColdStartInfo }>('/insights'),
+  insightAuto: () => request<{ enabled: boolean; asked: boolean }>('/insights/auto'),
+  setInsightAuto: (enabled: boolean) =>
+    request<{ ok: true; enabled: boolean; asked: boolean }>('/insights/auto', {
+      method: 'POST',
+      body: JSON.stringify({ enabled })
+    }),
   insight: (id: number) => request<{ insight: Insight }>(`/insights/${id}`),
   generateSingleInsight: (body: { periodType?: 'week' | 'month' | 'manual'; start?: string; end?: string }) =>
     request<{
