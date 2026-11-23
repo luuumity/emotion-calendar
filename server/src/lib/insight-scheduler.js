@@ -106,6 +106,21 @@ function periodCounts(userId, start, end) {
     .get(userId, start, end)
 }
 
+/** 该周期是否已被某份冷启动全量报告完整覆盖。 */
+function coldCoversPeriod(userId, start, end) {
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM insights
+         WHERE scope = 'single' AND user_id = ? AND kind = 'cold'
+           AND period_start <= ? AND period_end >= ?
+         LIMIT 1`
+      )
+      .get(userId, start, end)
+  )
+}
+
+
 async function pushReport(userId, cadence, kind) {
   const isMonthly = cadence === 'monthly'
   const periodName = isMonthly ? '上月' : '上周'
@@ -199,6 +214,10 @@ async function runCadence(user, now, cadence) {
   if (!cfg.ready(local)) return
 
   const { start, end } = cfg.range(local)
+  if (coldCoversPeriod(user.id, start, end)) {
+    console.log(`[insights] 冷启动已覆盖 ${start}..${end}，跳过${cfg.label} user=${user.id}`)
+    return
+  }
   const cols = FAILURE_COLUMNS[cadence]
   if (user[cols.key] === start && user[cols.count] >= MAX_FAILURES) return
 
