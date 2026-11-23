@@ -12,8 +12,19 @@ import {
 } from './single-insight.js'
 
 const MAX_FAILURES = 3
+const DEFAULT_CONCURRENCY = 3
+// 进程内并发池：扫描只负责入队，执行按上限并发；分钟级生成不再拖住整轮扫描
+const concurrency = Number(process.env.INSIGHT_CONCURRENCY) || DEFAULT_CONCURRENCY
 
-let running = false
+const queue = []
+const queued = new Set()
+const inFlight = new Set()
+let scanning = false
+
+const USER_FIELDS = `id, timezone,
+  auto_insight_enabled, auto_insight_monthly,
+  auto_insight_fail_week, auto_insight_fail_count,
+  auto_insight_fail_key_monthly, auto_insight_fail_count_monthly`
 
 function localParts(now, timeZone) {
   try {
@@ -173,11 +184,14 @@ const CADENCES = {
 
 async function generateColdStart(user, now) {
   const cold = getSingleColdStartInfo(user.id)
-  if (!cold.needed || !cold.hasRecords) return
-  if (cold.recordCount < 3) return
+  if (!cold.needed || !cold.hasRecords) return 'skip'
+  if (cold.recordCount < 3) return 'skip'
 
   const failureKey = cold.start || 'cold'
-  if (user.auto_insight_fail_week === failureKey && user.auto_insight_fail_count >= MAX_FAILURES) return
+  if (user.auto_insight_fail_week === failureKey && user.auto_insight_fail_count >= MAX_FAILURES) {
+    console.log(`[insights] 冷启动已放弃 user=${user.id}，本轮放行周报/月报`)
+    return 'abandoned'
+  }
 
   try {
     const result = await generateSingleInsightSync({
@@ -194,16 +208,19 @@ async function generateColdStart(user, now) {
     console.log(
       `[insights] 自动冷启动 user=${user.id} action=${result.action} cold=${result.coldStart}`
     )
+    return 'ok'
   } catch (err) {
     if (err.code === 'GENERATION_IN_PROGRESS') {
       console.log(`[insights] 自动冷启动跳过 user=${user.id}：已有生成任务`)
-      return
+      return 'busy'
     }
     const failures = recordFailure(user, 'weekly', failureKey)
     console.error(
       `[insights] 自动冷启动失败 user=${user.id} attempt=${failures}/${MAX_FAILURES}:`,
       err.message
     )
+    // 重试次数用尽后不再无限阻塞该用户的周报/月报
+    return failures >= MAX_FAILURES ? 'abandoned' : 'failed'
   }
 }
 
@@ -285,8 +302,11 @@ async function runForUser(user, now) {
 
   // 冷启动只生成一份全量报告，本轮不再生成周报/月报，避免第一次开启就出多份
   if (cold.needed) {
-    await generateColdStart(user, now)
-    return
+    const outcome = await generateColdStart(user, now)
+    if (outcome !== 'abandoned') return
+    // 冷启动重试次数用尽：重读用户行，避免与周报共用的失败计数影响后续判断
+    const fresh = db.prepare(`SELECT ${USER_FIELDS} FROM users WHERE id = ?`).get(user.id)
+    if (fresh) user = fresh
   }
 
   if (user.auto_insight_enabled === 1) {
@@ -297,31 +317,50 @@ async function runForUser(user, now) {
   }
 }
 
-/** 单次扫描。导出便于测试与手动触发。 */
+function enqueue(user, now) {
+  if (inFlight.has(user.id) || queued.has(user.id)) return
+  queued.add(user.id)
+  queue.push({ user, now })
+}
+
+/** 按上限并发消费队列；完成一个就补一个。 */
+function drain() {
+  while (inFlight.size < concurrency && queue.length) {
+    const task = queue.shift()
+    queued.delete(task.user.id)
+    inFlight.add(task.user.id)
+    runForUser(task.user, task.now)
+      .catch((err) => console.error(`[insights] 生成失败 user=${task.user.id}:`, err.message))
+      .finally(() => {
+        inFlight.delete(task.user.id)
+        drain()
+      })
+  }
+}
+
+/** 单次扫描：只做发现与入队，立即返回。导出便于测试与手动触发。 */
 export async function tickInsights({ now = new Date() } = {}) {
-  if (running) return
-  running = true
+  if (scanning) return { skipped: true, queued: queue.length, inFlight: inFlight.size }
+  scanning = true
   try {
-    if (!hasDeepSeekKey()) return
+    if (!hasDeepSeekKey()) return { scanned: 0, queued: 0, inFlight: 0 }
     const users = db
       .prepare(
-        `SELECT id, timezone,
-                auto_insight_enabled, auto_insight_monthly,
-                auto_insight_fail_week, auto_insight_fail_count,
-                auto_insight_fail_key_monthly, auto_insight_fail_count_monthly
+        `SELECT ${USER_FIELDS}
          FROM users
          WHERE auto_insight_enabled = 1 OR auto_insight_monthly = 1`
       )
       .all()
-    for (const user of users) {
-      try {
-        await runForUser(user, now)
-      } catch (err) {
-        console.error(`[insights] 扫描用户失败 user=${user.id}:`, err.message)
-      }
+    for (const user of users) enqueue(user, now)
+    drain()
+    if (users.length) {
+      console.log(
+        `[insights] 扫描完成 users=${users.length} queued=${queue.length} inFlight=${inFlight.size} concurrency=${concurrency}`
+      )
     }
+    return { scanned: users.length, queued: queue.length, inFlight: inFlight.size }
   } finally {
-    running = false
+    scanning = false
   }
 }
 
@@ -333,5 +372,5 @@ export function startInsightScheduler() {
   run()
   const timer = setInterval(run, 60 * 60 * 1000)
   timer.unref()
-  console.log('[insights] 定时单人报告调度已启动（每小时检查）')
+  console.log(`[insights] 定时单人报告调度已启动（每小时检查，并发 ${concurrency}）`)
 }

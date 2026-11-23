@@ -4,9 +4,15 @@
 
 const BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
+// 单次 HTTP 请求上限：防止上游挂起后长期占用并发槽位
+const TIMEOUT_MS = Number(process.env.DEEPSEEK_TIMEOUT_MS) || 120000
 
 const API_KEY = process.env.DEEPSEEK_API_KEY
 const HAS_KEY = Boolean(API_KEY)
+
+function formatTimeout(ms) {
+  return ms >= 1000 ? `${Math.round(ms / 1000)} 秒` : `${ms} 毫秒`
+}
 
 // 服务端工具：模型可自行读取最后一条 user 消息中的链接。不按次计费，只算 token
 const DEFAULT_TOOLS = [{ type: 'deepseek_read_url' }]
@@ -52,27 +58,56 @@ export async function callDeepSeek(messages, opts = {}) {
     ...(tools.length ? { tools } : {})
   }
 
-  const resp = await fetch(`${BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${API_KEY}`
-    },
-    body: JSON.stringify(payload)
-  })
+  const timeoutMs = opts.timeoutMs ?? TIMEOUT_MS
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
 
-  if (!resp.ok) {
-    const body = await resp.text()
-    throw new Error(`DeepSeek API ${resp.status}: ${body.slice(0, 200)}`)
+  // 上游（如整轮报告的截止时间）可以提前取消
+  const upstream = opts.signal || null
+  const onAbort = () => controller.abort()
+  if (upstream) {
+    if (upstream.aborted) controller.abort()
+    else upstream.addEventListener('abort', onAbort, { once: true })
   }
 
-  const data = await resp.json()
-  const message = data.choices?.[0]?.message || {}
-  return {
-    content: message.content ?? '',
-    toolCalls: Array.isArray(message.tool_calls) && message.tool_calls.length ? message.tool_calls : null,
-    message,
-    usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    model: data.model || MODEL
+  try {
+    const resp = await fetch(`${BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${API_KEY}`
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    })
+
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(`DeepSeek API ${resp.status}: ${body.slice(0, 200)}`)
+    }
+
+    const data = await resp.json()
+    const message = data.choices?.[0]?.message || {}
+    return {
+      content: message.content ?? '',
+      toolCalls: Array.isArray(message.tool_calls) && message.tool_calls.length ? message.tool_calls : null,
+      message,
+      usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      model: data.model || MODEL
+    }
+  } catch (err) {
+    if (timedOut) {
+      const timeoutErr = new Error(`DeepSeek 请求超时（${formatTimeout(timeoutMs)}）`)
+      timeoutErr.code = 'LLM_TIMEOUT'
+      throw timeoutErr
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+    if (upstream) upstream.removeEventListener('abort', onAbort)
   }
 }

@@ -257,6 +257,8 @@ export function buildProposalNotice(sessionId, userId, since) {
 // 纯防失控的安全阈值，不是产品级限制。
 // 15 轮用于覆盖“统计 → 翻页 → 取详情”这类组合查询；用尽后仍会强制收尾一次。
 const MAX_TOOL_STEPS = 15
+// 单轮对话上限：避免工具循环最长 15 步时无限拖延
+const CHAT_TIMEOUT_MS = Number(process.env.CHAT_TIMEOUT_MS) || 300000
 
 router.post('/sessions/:id/messages', async (req, res) => {
   const id = toInt(req.params.id)
@@ -356,16 +358,29 @@ router.post('/sessions/:id/messages', async (req, res) => {
         turnId: userInfo.lastInsertRowid,
         run
       },
-      { functions: FUNCTION_TOOLS, maxSteps: MAX_TOOL_STEPS }
+      { functions: FUNCTION_TOOLS, maxSteps: MAX_TOOL_STEPS, timeoutMs: CHAT_TIMEOUT_MS }
     )
 
     // 6. 存 assistant 回复（模型只提议时可能没有正文，给一句兜底）
     const assistantText = result.content || (run.proposalIds.length ? '我整理了几条建议，等你确认。' : '')
+    const usage = result.usage || {}
     const assistantInfo = db
       .prepare(
-        'INSERT INTO chat_messages (session_id, role, content, refs, prompt_tokens, prompt_chars, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?)'
+        `INSERT INTO chat_messages
+          (session_id, role, content, refs, prompt_tokens, prompt_chars, completion_tokens, cache_hit_tokens, cache_miss_tokens, created_at)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`
       )
-      .run(id, 'assistant', assistantText, result.lastPromptTokens, result.lastPromptChars, nowIso())
+      .run(
+        id,
+        'assistant',
+        assistantText,
+        result.lastPromptTokens,
+        result.lastPromptChars,
+        usage.completion_tokens || 0,
+        usage.prompt_cache_hit_tokens || 0,
+        usage.prompt_cache_miss_tokens || 0,
+        nowIso()
+      )
 
     // 7. 把本轮提议绑定到这条 assistant 消息
     if (run.proposalIds.length) {
@@ -395,6 +410,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
       db.prepare(`DELETE FROM chat_proposals WHERE id IN (${run.proposalIds.map(() => '?').join(',')})`).run(...run.proposalIds)
     }
     console.error('[chat] 调用失败:', err.message)
+    if (err.code === 'LLM_TIMEOUT') return res.status(504).json({ error: 'AI 响应超时，请稍后重试' })
     res.status(500).json({ error: 'AI 暂时不可用，请稍后再试' })
   }
 })

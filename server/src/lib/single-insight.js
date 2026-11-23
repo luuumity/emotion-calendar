@@ -12,6 +12,8 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 // 报告侧只允许最多 6 步模型调用，额度用尽后强制收尾一次
 const MAX_REPORT_TOOL_STEPS = 6
+// 单份报告的整轮上限：包含所有工具步与收尾请求
+const REPORT_TIMEOUT_MS = Number(process.env.REPORT_TIMEOUT_MS) || 600000
 
 export function isValidDay(s) {
   if (!DAY_RE.test(s)) return false
@@ -326,6 +328,7 @@ async function generateSingleInsightSyncInner({
     {
       functions: REPORT_FUNCTION_TOOLS,
       maxSteps: MAX_REPORT_TOOL_STEPS,
+      timeoutMs: REPORT_TIMEOUT_MS,
       allowedTools: ['get_record', 'get_report'],
       finalHint: '回读额度已用完。请直接根据已有信息完成报告，不要输出工具调用格式；没读到的内容不要编造。'
     }
@@ -339,12 +342,28 @@ async function generateSingleInsightSyncInner({
   }
 
   // 覆盖半周报告：生成成功后再 UPDATE，失败时旧报告保留
+  const usage = result.usage || {}
   if (existing && force) {
     db.prepare(
       `UPDATE insights
-       SET content = ?, model = ?, prompt_version = ?, origin = ?, kind = ?, tokens = ?, generated_at = ?
+       SET content = ?, model = ?, prompt_version = ?, origin = ?, kind = ?, tokens = ?,
+           prompt_tokens = ?, completion_tokens = ?, cache_hit_tokens = ?, cache_miss_tokens = ?,
+           generated_at = ?
        WHERE id = ?`
-    ).run(result.content, result.model, 'single-v4', origin, kind, result.usage.total_tokens || 0, now, existing.id)
+    ).run(
+      result.content,
+      result.model,
+      'single-v4',
+      origin,
+      kind,
+      usage.total_tokens || 0,
+      usage.prompt_tokens || 0,
+      usage.completion_tokens || 0,
+      usage.prompt_cache_hit_tokens || 0,
+      usage.prompt_cache_miss_tokens || 0,
+      now,
+      existing.id
+    )
     const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(existing.id)
     return {
       insight: view(row),
@@ -361,10 +380,28 @@ async function generateSingleInsightSyncInner({
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO insights
-        (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens, generated_at)
-       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens,
+         prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, generated_at)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run('single', userId, resolvedType, start, end, result.content, result.model, 'single-v4', origin, kind, result.usage.total_tokens || 0, now)
+    .run(
+      'single',
+      userId,
+      resolvedType,
+      start,
+      end,
+      result.content,
+      result.model,
+      'single-v4',
+      origin,
+      kind,
+      usage.total_tokens || 0,
+      usage.prompt_tokens || 0,
+      usage.completion_tokens || 0,
+      usage.prompt_cache_hit_tokens || 0,
+      usage.prompt_cache_miss_tokens || 0,
+      now
+    )
 
   const row = findExistingSingleInsight(userId, resolvedType, start, end)
   return {

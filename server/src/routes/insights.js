@@ -12,6 +12,7 @@ import { cropForCouple } from '../lib/privacy.js'
 import { makeCoupleKey, getOrInitCoupleMemory, computeIncrementStart, updateCoupleMemory, isInCouple } from '../lib/incremental.js'
 import { buildCoupleReportMessages, buildCoupleMemoryMessages } from '../lib/prompts/couple-report.js'
 import { generateSingleInsightSync, getSingleColdStartInfo, view, isValidDay, collectSinglePersonaData } from '../lib/single-insight.js'
+import { mergeUsage } from '../lib/tool-loop.js'
 
 const router = Router()
 router.use(requireUser)
@@ -156,6 +157,7 @@ router.post('/single/generate', async (req, res) => {
     if (err.code === 'NO_RECORDS') return res.status(400).json({ error: err.message })
     if (err.code === 'GENERATION_IN_PROGRESS') return res.status(409).json({ error: err.message })
     if (err.code === 'EMPTY_CONTENT') return res.status(502).json({ error: err.message })
+    if (err.code === 'LLM_TIMEOUT') return res.status(504).json({ error: 'AI 生成超时，请稍后重试' })
     console.error('[insights] 单人报告生成失败:', err.message)
     res.status(500).json({ error: '生成失败，请稍后再试' })
   }
@@ -279,21 +281,28 @@ router.post('/couple/generate', async (req, res) => {
       recordsB: bCropped.records
     })
     const nextSummary = memoryResult?.text || result.content.slice(0, COUPLE_MEMORY_LIMIT)
-    const totalTokens = (result.usage?.total_tokens || 0) + (memoryResult?.usage?.total_tokens || 0)
+    const usage = mergeUsage(mergeUsage({}, result.usage), memoryResult?.usage)
+    const totalTokens = usage.total_tokens || 0
 
     // 写 insights
     const generatedAt = now.toISOString()
     db.prepare(
       `INSERT OR IGNORE INTO insights
-        (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens, covered_until, generated_at)
-       VALUES (?, NULL, ?, 'manual', ?, ?, ?, ?, 'couple-v2', 'manual', 'custom', ?, ?, ?)`
+        (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens,
+         prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, covered_until, generated_at)
+       VALUES (?, NULL, ?, 'manual', ?, ?, ?, ?, 'couple-v2', 'manual', 'custom', ?, ?, ?, ?, ?, ?, ?)`
     ).run(
-      'couple', coupleKey,
+      'couple',
+      coupleKey,
       analysisStart,
       periodEnd,
       result.content,
       result.model,
       totalTokens,
+      usage.prompt_tokens || 0,
+      usage.completion_tokens || 0,
+      usage.prompt_cache_hit_tokens || 0,
+      usage.prompt_cache_miss_tokens || 0,
       periodEnd,
       generatedAt
     )
@@ -304,6 +313,7 @@ router.post('/couple/generate', async (req, res) => {
     res.status(201).json({ insight: view(row), usage: result.usage, hasKey: hasDeepSeekKey() })
   } catch (err) {
     console.error('[insights] 双人报告生成失败:', err.message)
+    if (err.code === 'LLM_TIMEOUT') return res.status(504).json({ error: 'AI 生成超时，请稍后重试' })
     res.status(500).json({ error: '生成失败，请稍后再试' })
   }
 })

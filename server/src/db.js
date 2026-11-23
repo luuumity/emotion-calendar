@@ -392,6 +392,22 @@ const migrations = [
         UPDATE users SET auto_insight_monthly = 0 WHERE auto_insight_enabled IS NOT NULL;
       `)
     }
+  },
+  {
+    version: 16,
+    // 用量记账：聊天与报告分别记录输入/输出/缓存命中 token，供成本统计与缓存验证
+    up() {
+      db.exec(`
+        ALTER TABLE insights ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE insights ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE insights ADD COLUMN cache_hit_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE insights ADD COLUMN cache_miss_tokens INTEGER NOT NULL DEFAULT 0;
+
+        ALTER TABLE chat_messages ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE chat_messages ADD COLUMN cache_hit_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE chat_messages ADD COLUMN cache_miss_tokens INTEGER NOT NULL DEFAULT 0;
+      `)
+    }
   }
 ]
 

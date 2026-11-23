@@ -15,7 +15,9 @@ export function mergeUsage(total, usage) {
   return {
     prompt_tokens: (total.prompt_tokens || 0) + (usage.prompt_tokens || 0),
     completion_tokens: (total.completion_tokens || 0) + (usage.completion_tokens || 0),
-    total_tokens: (total.total_tokens || 0) + (usage.total_tokens || 0)
+    total_tokens: (total.total_tokens || 0) + (usage.total_tokens || 0),
+    prompt_cache_hit_tokens: (total.prompt_cache_hit_tokens || 0) + (usage.prompt_cache_hit_tokens || 0),
+    prompt_cache_miss_tokens: (total.prompt_cache_miss_tokens || 0) + (usage.prompt_cache_miss_tokens || 0)
   }
 }
 
@@ -57,6 +59,7 @@ export function recordTraceEvent(ctx, seq, type, payload) {
  * @param {object} [options]
  * @param {Array} [options.functions] 客户端 function calling 工具声明
  * @param {number} [options.maxSteps] 工具步数上限，用尽后强制收尾一次
+ * @param {number} [options.timeoutMs] 整轮截止时间；0 表示不限制（单次请求仍受 DEEPSEEK_TIMEOUT_MS 约束）
  * @param {Array<string>|null} [options.allowedTools] 白名单；命中名单外的调用直接拒绝
  * @param {Function} [options.execute] 工具执行函数，默认 executeTool
  * @param {string} [options.finalHint] 额度用尽时的收尾提示
@@ -65,6 +68,7 @@ export async function runWithTools(baseMessages, ctx, options = {}) {
   const {
     functions = [],
     maxSteps = DEFAULT_MAX_STEPS,
+    timeoutMs = 0,
     allowedTools = null,
     execute = executeTool,
     finalHint = DEFAULT_FINAL_HINT
@@ -78,77 +82,99 @@ export async function runWithTools(baseMessages, ctx, options = {}) {
   let lastModel = ''
   let traceSeq = 0
 
-  for (let step = 0; step < maxSteps; step++) {
-    lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
-    const result = await callDeepSeek(work, { functions })
-    usage = mergeUsage(usage, result.usage)
-    lastPromptTokens = result.usage?.prompt_tokens || lastPromptTokens
-    if (result.model) lastModel = result.model
+  // 整轮截止时间：到点后取消在途请求，避免一份报告无限占用并发槽位
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  let timedOut = false
+  const timer = controller
+    ? setTimeout(() => {
+        timedOut = true
+        controller.abort()
+      }, timeoutMs)
+    : null
+  const turnOptions = controller ? { functions, signal: controller.signal } : { functions }
 
-    if (!result.toolCalls) {
-      return { content: result.content, usage, lastPromptTokens, lastPromptChars, model: lastModel }
-    }
+  try {
+    for (let step = 0; step < maxSteps; step++) {
+      lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
+      const result = await callDeepSeek(work, turnOptions)
+      usage = mergeUsage(usage, result.usage)
+      lastPromptTokens = result.usage?.prompt_tokens || lastPromptTokens
+      if (result.model) lastModel = result.model
 
-    const assistantMsg = { role: 'assistant', content: result.message.content ?? '', tool_calls: result.toolCalls }
-    // 思考模式下，带 tool_calls 的 assistant 消息必须把 reasoning_content 原样带回去
-    if (result.message.reasoning_content) assistantMsg.reasoning_content = result.message.reasoning_content
-    work.push(assistantMsg)
-    recordTraceEvent(ctx, ++traceSeq, 'assistant_tool_calls', {
-      content: assistantMsg.content,
-      tool_calls: result.toolCalls,
-      reasoning_content: result.message.reasoning_content ?? null
-    })
-
-    for (const call of result.toolCalls) {
-      const name = call.function?.name
-      const rawArgs = call.function?.arguments || '{}'
-      const key = `${name}:${rawArgs}`
-      let args = {}
-      try {
-        args = JSON.parse(rawArgs)
-      } catch {
-        args = {}
+      if (!result.toolCalls) {
+        return { content: result.content, usage, lastPromptTokens, lastPromptChars, model: lastModel }
       }
 
-      let output
-      if (allowedTools && !allowedTools.includes(name)) {
-        output = JSON.stringify({
-          ok: false,
-          reason: 'tool_not_allowed',
-          hint: '这里只能回读具体的记录或报告，不要全量扫描。'
-        })
-      } else if (seen.has(key)) {
-        output = JSON.stringify({
-          ok: false,
-          reason: 'duplicate_call',
-          hint: '同样的查询已经执行过，请换一个 offset、缩小范围，或换一种查法。'
-        })
-      } else {
-        seen.add(key)
-        output = execute(name, args, ctx)
-      }
-
-      const info = classifyToolOutput(output)
-      recordTraceEvent(ctx, ++traceSeq, 'tool_result', {
-        tool_call_id: call.id,
-        name,
-        raw_args: rawArgs,
-        args,
-        output,
-        status: info.status,
-        error: info.error || null
+      const assistantMsg = { role: 'assistant', content: result.message.content ?? '', tool_calls: result.toolCalls }
+      // 思考模式下，带 tool_calls 的 assistant 消息必须把 reasoning_content 原样带回去
+      if (result.message.reasoning_content) assistantMsg.reasoning_content = result.message.reasoning_content
+      work.push(assistantMsg)
+      recordTraceEvent(ctx, ++traceSeq, 'assistant_tool_calls', {
+        content: assistantMsg.content,
+        tool_calls: result.toolCalls,
+        reasoning_content: result.message.reasoning_content ?? null
       })
 
-      work.push({ role: 'tool', tool_call_id: call.id, content: output })
-    }
-  }
+      for (const call of result.toolCalls) {
+        const name = call.function?.name
+        const rawArgs = call.function?.arguments || '{}'
+        const key = `${name}:${rawArgs}`
+        let args = {}
+        try {
+          args = JSON.parse(rawArgs)
+        } catch {
+          args = {}
+        }
 
-  // 步数用尽：明确告知额度用尽并撤掉工具，避免模型把工具调用当文本输出
-  work.push({ role: 'system', content: finalHint })
-  lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
-  const final = await callDeepSeek(work, { tools: false })
-  usage = mergeUsage(usage, final.usage)
-  lastPromptTokens = final.usage?.prompt_tokens || lastPromptTokens
-  if (final.model) lastModel = final.model
-  return { content: final.content, usage, lastPromptTokens, lastPromptChars, model: lastModel }
+        let output
+        if (allowedTools && !allowedTools.includes(name)) {
+          output = JSON.stringify({
+            ok: false,
+            reason: 'tool_not_allowed',
+            hint: '这里只能回读具体的记录或报告，不要全量扫描。'
+          })
+        } else if (seen.has(key)) {
+          output = JSON.stringify({
+            ok: false,
+            reason: 'duplicate_call',
+            hint: '同样的查询已经执行过，请换一个 offset、缩小范围，或换一种查法。'
+          })
+        } else {
+          seen.add(key)
+          output = execute(name, args, ctx)
+        }
+
+        const info = classifyToolOutput(output)
+        recordTraceEvent(ctx, ++traceSeq, 'tool_result', {
+          tool_call_id: call.id,
+          name,
+          raw_args: rawArgs,
+          args,
+          output,
+          status: info.status,
+          error: info.error || null
+        })
+
+        work.push({ role: 'tool', tool_call_id: call.id, content: output })
+      }
+    }
+
+    // 步数用尽：明确告知额度用尽并撤掉工具，避免模型把工具调用当文本输出
+    work.push({ role: 'system', content: finalHint })
+    lastPromptChars = work.reduce((n, m) => n + String(m.content || '').length, 0)
+    const final = await callDeepSeek(work, controller ? { tools: false, signal: controller.signal } : { tools: false })
+    usage = mergeUsage(usage, final.usage)
+    lastPromptTokens = final.usage?.prompt_tokens || lastPromptTokens
+    if (final.model) lastModel = final.model
+    return { content: final.content, usage, lastPromptTokens, lastPromptChars, model: lastModel }
+  } catch (err) {
+    if (timedOut) {
+      const timeoutErr = new Error(`AI 生成超时（${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)} 秒` : `${timeoutMs} 毫秒`}）`)
+      timeoutErr.code = 'LLM_TIMEOUT'
+      throw timeoutErr
+    }
+    throw err
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
