@@ -12,6 +12,7 @@ import { buildTraceLogEntries, isTraceLogEnabled } from '../lib/trace-log.js'
 import { FUNCTION_TOOLS } from '../lib/tools.js'
 import { runWithTools } from '../lib/tool-loop.js'
 import { withLiveTagTarget } from '../lib/proposalView.js'
+import { recordUsageEvent } from '../lib/usage-events.js'
 
 const router = Router()
 router.use(requireUser)
@@ -364,32 +365,49 @@ router.post('/sessions/:id/messages', async (req, res) => {
     // 6. 存 assistant 回复（模型只提议时可能没有正文，给一句兜底）
     const assistantText = result.content || (run.proposalIds.length ? '我整理了几条建议，等你确认。' : '')
     const usage = result.usage || {}
-    const assistantInfo = db
-      .prepare(
-        `INSERT INTO chat_messages
-          (session_id, role, content, refs, prompt_tokens, prompt_chars, completion_tokens, cache_hit_tokens, cache_miss_tokens, created_at)
-         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        id,
-        'assistant',
-        assistantText,
-        result.lastPromptTokens,
-        result.lastPromptChars,
-        usage.completion_tokens || 0,
-        usage.prompt_cache_hit_tokens || 0,
-        usage.prompt_cache_miss_tokens || 0,
-        nowIso()
-      )
+    const createdAt = nowIso()
+    const persistTurn = db.transaction(() => {
+      const info = db
+        .prepare(
+          `INSERT INTO chat_messages
+            (session_id, role, content, refs, prompt_tokens, prompt_chars, completion_tokens, cache_hit_tokens, cache_miss_tokens, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          id,
+          'assistant',
+          assistantText,
+          result.lastPromptTokens,
+          result.lastPromptChars,
+          usage.completion_tokens || 0,
+          usage.prompt_cache_hit_tokens || 0,
+          usage.prompt_cache_miss_tokens || 0,
+          createdAt
+        )
 
-    // 7. 把本轮提议绑定到这条 assistant 消息
-    if (run.proposalIds.length) {
-      const placeholders = run.proposalIds.map(() => '?').join(',')
-      db.prepare(
-        `UPDATE chat_proposals SET message_id = ?
-         WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`
-      ).run(assistantInfo.lastInsertRowid, id, req.user.id, ...run.proposalIds)
-    }
+      // 7. 把本轮提议绑定到这条 assistant 消息
+      if (run.proposalIds.length) {
+        const placeholders = run.proposalIds.map(() => '?').join(',')
+        db.prepare(
+          `UPDATE chat_proposals SET message_id = ?
+           WHERE session_id = ? AND user_id = ? AND id IN (${placeholders})`
+        ).run(info.lastInsertRowid, id, req.user.id, ...run.proposalIds)
+      }
+
+      // 用量流水与会话解耦：删会话不影响历史用量
+      recordUsageEvent({
+        userId: req.user.id,
+        kind: 'chat',
+        sourceId: info.lastInsertRowid,
+        dedupeKey: `chat:${info.lastInsertRowid}`,
+        model: result.model,
+        usage,
+        createdAt
+      })
+
+      return info
+    })
+    const assistantInfo = persistTurn()
 
     // 8. 返回
     const assistantMsg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(assistantInfo.lastInsertRowid)

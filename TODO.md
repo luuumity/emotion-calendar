@@ -129,8 +129,8 @@
 
 **成本与记账口径（2026-11-20 定）**
 
-- [ ] 报告：`insights.tokens` 已有，按 scope 区分单人/双人
-- [ ] 对话：`chat_messages` 已有 `prompt_tokens` / `prompt_chars`；补 `completion_tokens` 与缓存命中 token，用于按输入/输出单价分别计价
+- [x] 报告：`insights` 已记 `prompt_tokens` / `completion_tokens` / 缓存命中 token
+- [x] 对话：`chat_messages` 已补 `completion_tokens` 与缓存命中 token；两处用量统一进 v17 `usage_events` 流水（删除会话不影响历史）
 - [ ] 个人总成本 = 单人报告 + 双人报告 + 实时对话三部分之和，可分别统计
 - [ ] 预算上限按用户维度累计（日/周），超限熔断；聚合查询依赖 `user_id + created_at` 索引
 - [ ] 不记录逐 token 明细；缓存命中 token 只做汇总，不做逐条明细
@@ -466,6 +466,7 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 **要用的**
 
 - [x] **usage 记账**：落 `prompt_tokens` / `completion_tokens` / `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，报告与对话都记（2026-11-23 v16 上线）
+  - 2026-11-24 v17 增加独立流水 `usage_events`，删除会话/报告不再丢失用量；回填脚本 `backfill-usage-events.mjs`
   - 用户侧用量与缓存命中率展示未实现，方案见 [usage-analytics.md](docs/usage-analytics.md)
 - [ ] **上下文缓存**（2026-11-23 调整：**先采集，不优化**）：先靠 usage 记账量出真实 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，验证命中率（命中 0.02 元/M vs 未命中 1 元/M）。现有聊天 prompt 已按「固定指令 → 稳定 persona/facts → 记忆/摘要 → 历史 → 本轮」递增变化频率排列（见 `prompts/chat.js`），命中率不足时再考虑调序，不先动结构
 - [ ] **思考模式开关**：聊天关闭（要快），单人/双人报告开启（要深）；通过请求体配置，不共用默认值

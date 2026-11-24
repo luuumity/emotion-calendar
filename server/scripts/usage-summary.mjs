@@ -1,6 +1,6 @@
-// 用量汇总：聊天与报告的 token 明细、缓存命中率
-// 用法：node scripts/usage-summary.mjs [天数=7]
-// 说明：聊天的 prompt_tokens 记录的是末次请求规模，不是整轮累加；completion 与缓存是整轮累加。
+// 用量汇总：直接读独立流水 usage_events（删会话/报告不影响历史）。
+// 只统计 token，不折算金额。用法：node scripts/usage-summary.mjs [天数=7]
+// 若表为空，先跑 scripts/backfill-usage-events.mjs 回填 v16 之后的历史。
 
 import { db } from '../src/db.js'
 
@@ -13,44 +13,41 @@ const hitRate = (hit, miss) => {
   return total ? `${((hit / total) * 100).toFixed(1)}%` : '-'
 }
 
-const chat = db
+const rows = db
   .prepare(
-    `SELECT COUNT(*) AS calls,
-            SUM(prompt_tokens) AS prompt,
-            SUM(completion_tokens) AS completion,
-            SUM(cache_hit_tokens) AS hit,
-            SUM(cache_miss_tokens) AS miss
-     FROM chat_messages
-     WHERE role = 'assistant' AND created_at >= ?`
-  )
-  .get(since)
-
-const reports = db
-  .prepare(
-    `SELECT scope,
+    `SELECT kind,
             COUNT(*) AS calls,
-            SUM(prompt_tokens) AS prompt,
-            SUM(completion_tokens) AS completion,
-            SUM(cache_hit_tokens) AS hit,
-            SUM(cache_miss_tokens) AS miss
-     FROM insights
-     WHERE generated_at >= ?
-     GROUP BY scope`
+            SUM(input_tokens) AS input,
+            SUM(output_tokens) AS output,
+            SUM(hit_tokens) AS hit,
+            SUM(miss_tokens) AS miss
+     FROM usage_events
+     WHERE created_at >= ?
+     GROUP BY kind`
   )
   .all(since)
 
+const LABELS = { chat: '聊天', single: '单人报告', couple: '双人报告' }
+const byKind = Object.fromEntries(rows.map((r) => [r.kind, r]))
+const total = rows.reduce(
+  (acc, r) => ({
+    calls: acc.calls + n(r.calls),
+    input: acc.input + n(r.input),
+    output: acc.output + n(r.output),
+    hit: acc.hit + n(r.hit),
+    miss: acc.miss + n(r.miss)
+  }),
+  { calls: 0, input: 0, output: 0, hit: 0, miss: 0 }
+)
+
 function line(label, r) {
   const calls = String(n(r.calls)).padStart(4)
-  const prompt = String(n(r.prompt)).padStart(9)
-  const completion = String(n(r.completion)).padStart(8)
+  const input = String(n(r.input)).padStart(9)
+  const output = String(n(r.output)).padStart(8)
   const rate = hitRate(n(r.hit), n(r.miss)).padStart(6)
-  return `${label.padEnd(10)} 调用 ${calls}  输入 ${prompt}  输出 ${completion}  命中 ${rate}`
+  return `${label.padEnd(10)} 调用 ${calls}  输入 ${input}  输出 ${output}  命中 ${rate}`
 }
 
 console.log(`最近 ${days} 天用量（${since.slice(0, 10)} 起）`)
-console.log(line('聊天', chat || {}))
-if (reports.length) {
-  for (const r of reports) console.log(line(r.scope === 'couple' ? '双人报告' : '单人报告', r))
-} else {
-  console.log(line('报告', {}))
-}
+for (const kind of ['chat', 'single', 'couple']) console.log(line(LABELS[kind], byKind[kind] || {}))
+console.log(line('合计', total))

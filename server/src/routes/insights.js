@@ -13,6 +13,7 @@ import { makeCoupleKey, getOrInitCoupleMemory, computeIncrementStart, updateCoup
 import { buildCoupleReportMessages, buildCoupleMemoryMessages } from '../lib/prompts/couple-report.js'
 import { generateSingleInsightSync, getSingleColdStartInfo, view, isValidDay, collectSinglePersonaData } from '../lib/single-insight.js'
 import { mergeUsage } from '../lib/tool-loop.js'
+import { recordUsageEvent } from '../lib/usage-events.js'
 
 const router = Router()
 router.use(requireUser)
@@ -286,7 +287,7 @@ router.post('/couple/generate', async (req, res) => {
 
     // 写 insights
     const generatedAt = now.toISOString()
-    db.prepare(
+    const coupleInfo = db.prepare(
       `INSERT OR IGNORE INTO insights
         (scope, user_id, couple_key, period_type, period_start, period_end, content, model, prompt_version, origin, kind, tokens,
          prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, covered_until, generated_at)
@@ -306,6 +307,18 @@ router.post('/couple/generate', async (req, res) => {
       periodEnd,
       generatedAt
     )
+
+    if (coupleInfo.changes > 0) {
+      recordUsageEvent({
+        userId: req.user.id,
+        kind: 'couple',
+        sourceId: coupleInfo.lastInsertRowid,
+        dedupeKey: `report:${coupleInfo.lastInsertRowid}`,
+        model: result.model,
+        usage,
+        createdAt: generatedAt
+      })
+    }
 
     updateCoupleMemory(coupleKey, periodEnd, nextSummary)
 

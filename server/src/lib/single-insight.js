@@ -6,6 +6,7 @@ import { hasDeepSeekKey } from './llm.js'
 import { serializePersona } from './persona.js'
 import { REPORT_FUNCTION_TOOLS } from './tools.js'
 import { runWithTools } from './tool-loop.js'
+import { recordUsageEvent } from './usage-events.js'
 import { buildSingleReportMessages } from './prompts/single-report.js'
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -364,6 +365,15 @@ async function generateSingleInsightSyncInner({
       now,
       existing.id
     )
+    // 重新生成是真实消耗，按次追加，不覆盖上一版
+    recordUsageEvent({
+      userId,
+      kind: 'single',
+      sourceId: existing.id,
+      model: result.model,
+      usage,
+      createdAt: now
+    })
     const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(existing.id)
     return {
       insight: view(row),
@@ -402,6 +412,18 @@ async function generateSingleInsightSyncInner({
       usage.prompt_cache_miss_tokens || 0,
       now
     )
+
+  if (info.changes > 0) {
+    recordUsageEvent({
+      userId,
+      kind: 'single',
+      sourceId: info.lastInsertRowid,
+      dedupeKey: `report:${info.lastInsertRowid}`,
+      model: result.model,
+      usage,
+      createdAt: now
+    })
+  }
 
   const row = findExistingSingleInsight(userId, resolvedType, start, end)
   return {

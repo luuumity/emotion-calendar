@@ -408,6 +408,32 @@ const migrations = [
         ALTER TABLE chat_messages ADD COLUMN cache_miss_tokens INTEGER NOT NULL DEFAULT 0;
       `)
     }
+  },
+  {
+    version: 17,
+    // 独立用量流水：不挂会话/报告外键，删除会话或报告不会带走历史用量。
+    // dedupe_key 用于幂等（聊天按消息、回填按报告），报告重新生成时留空、按次追加。
+    up() {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS usage_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('chat', 'single', 'couple')),
+          source_id INTEGER,
+          dedupe_key TEXT,
+          model TEXT NOT NULL DEFAULT '',
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          hit_tokens INTEGER NOT NULL DEFAULT 0,
+          miss_tokens INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_events_dedupe
+          ON usage_events(dedupe_key) WHERE dedupe_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_usage_events_user_time
+          ON usage_events(user_id, created_at);
+      `)
+    }
   }
 ]
 
