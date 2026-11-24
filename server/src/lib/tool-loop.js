@@ -101,6 +101,35 @@ export async function runWithTools(baseMessages, ctx, options = {}) {
       lastPromptTokens = result.usage?.prompt_tokens || lastPromptTokens
       if (result.model) lastModel = result.model
 
+      // 服务端工具（deepseek_read_url 等）由上游执行，客户端只留痕，失败时打日志便于排查
+      for (const group of result.serverToolCalls || []) {
+        for (const call of group.calls || []) {
+          const url = call.action?.url || call.page?.url || ''
+          const failed = Boolean(call.error) || (call.status && call.status !== 'completed')
+          const error = failed
+            ? String(call.error?.code || call.error?.message || call.error || call.status || '读取失败')
+            : null
+          recordTraceEvent(ctx, ++traceSeq, 'tool_result', {
+            server: true,
+            tool_call_id: call.id,
+            name: call.type || 'server_tool',
+            raw_args: JSON.stringify(call.action || {}),
+            args: call.action || {},
+            status: failed ? 'error' : 'ok',
+            error,
+            output: JSON.stringify({
+              ok: !failed,
+              url,
+              title: call.page?.title || null,
+              published_at: call.page?.published_at || null
+            })
+          })
+          if (failed) {
+            console.warn(`[chat] 服务端工具失败 user=${ctx.userId} tool=${call.type} url=${url} error=${error}`)
+          }
+        }
+      }
+
       if (!result.toolCalls) {
         return { content: result.content, usage, lastPromptTokens, lastPromptChars, model: lastModel }
       }

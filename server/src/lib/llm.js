@@ -95,6 +95,9 @@ export async function callDeepSeek(messages, opts = {}) {
     return {
       content: message.content ?? '',
       toolCalls: Array.isArray(message.tool_calls) && message.tool_calls.length ? message.tool_calls : null,
+      serverToolCalls: Array.isArray(message.server_tool_calls) && message.server_tool_calls.length
+        ? message.server_tool_calls
+        : null,
       message,
       usage: data.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       model: data.model || MODEL
