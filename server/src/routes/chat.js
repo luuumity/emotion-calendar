@@ -418,7 +418,7 @@ router.post('/sessions/:id/messages', async (req, res) => {
           .map(proposalView)
       : []
     res.status(201).json({
-      userMessage: db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(userInfo.lastInsertRowid),
+      userMessage: messageView(db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(userInfo.lastInsertRowid)),
       assistantMessage: messageView(assistantMsg, proposals),
       usage: result.usage
     })
