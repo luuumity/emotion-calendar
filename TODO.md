@@ -24,10 +24,10 @@
 | `deepseek_read_url` | 已完成 | 聊天与报告恒定声明，只计 token；报告 prompt 已改为 system + user |
 | 模型 | 已完成 | 默认 `deepseek-v4-flash`（`deepseek-chat` 已于 2026-07-24 弃用） |
 | 图像理解 + Files API | 待做 | 截图作为理由/对话输入；默认仅自己可见 |
-| usage 记账 / 缓存前缀 / 思考开关 | 部分完成 | 记账已上线（v16，2026-11-23）：completion 与缓存命中 token 已落库；用户侧用量展示见 [usage-analytics.md](docs/usage-analytics.md)；思考开关未做，见 §2.13 |
+| usage 记账 / 缓存前缀 / 思考开关 | 部分完成 | 记账已上线（v16，2026-11-23）：completion 与缓存命中 token 已落库；v17 独立流水与用户侧用量页 `/usage` 已上线（2026-11-25，[usage-analytics.md](docs/usage-analytics.md)）；思考开关未做，见 §2.13 |
 | JSON 输出 / OCR | 暂缓 | 用途未定，见 §2.13 |
 | Persona 专业化 | 暂缓 | 仅记录思路，见 §2.14 |
-| 定时报告 / 每日聚合 | 已完成（v1 单人周报） | 服务进程内每小时扫描；周一 03:00 后补上一完整周；≥3 条；冷启动全量；半周报告原地覆盖；失败每小时重试最多 3 次；成功推送 |
+| 定时报告 / 每日聚合 | 已完成（单人周报 + 月报） | 服务进程内每小时扫描，有界并发（默认 3）；周报周一 02:00 后、月报 1 日 03:00 后补上一完整周期；周报≥3 条、月报≥8 天且≥10 条；冷启动全量且完整覆盖的周期跳过；半程报告原地覆盖；失败每小时重试最多 3 次；成功推送；LLM 请求带超时 |
 | 单人报告 prompt v2 | 已完成 | 单人去掉对话输入、按 `period_end` 截断、标签内联全文、只有截断项带 ID、>60 天长模板；`single-v2`；报告侧 6 步白名单回读 |
 | AI 标签唯一化 | 已完成 | 一球一标签 + 唯一索引；`propose_tag` 改为替换语义；用户手动标签不可覆盖 |
 | 聊天 token 记账 | 已完成 | 末次 `prompt_tokens` / `prompt_chars` + 整轮 `completion_tokens` / 缓存命中 token 均已落库；金额估算与展示方案见 [usage-analytics.md](docs/usage-analytics.md) |
@@ -467,7 +467,7 @@ DeepSeek API 现存的联网路径（本项目只用到第一条）：
 
 - [x] **usage 记账**：落 `prompt_tokens` / `completion_tokens` / `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，报告与对话都记（2026-11-23 v16 上线）
   - 2026-11-24 v17 增加独立流水 `usage_events`，删除会话/报告不再丢失用量；回填脚本 `backfill-usage-events.mjs`
-  - 用户侧用量与缓存命中率展示未实现，方案见 [usage-analytics.md](docs/usage-analytics.md)
+  - 用户侧用量与缓存命中率展示已上线（2026-11-25）：设置页入口 + 独立子页 `/usage`，接口 `GET /api/usage/summary?range=month|30d`，只展示 token，不算金额；口径见 [usage-analytics.md](docs/usage-analytics.md)
 - [ ] **上下文缓存**（2026-11-23 调整：**先采集，不优化**）：先靠 usage 记账量出真实 `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`，验证命中率（命中 0.02 元/M vs 未命中 1 元/M）。现有聊天 prompt 已按「固定指令 → 稳定 persona/facts → 记忆/摘要 → 历史 → 本轮」递增变化频率排列（见 `prompts/chat.js`），命中率不足时再考虑调序，不先动结构
 - [ ] **思考模式开关**：聊天关闭（要快），单人/双人报告开启（要深）；通过请求体配置，不共用默认值
 - [ ] **图像理解 + Files API**：记录/聊天支持上传截图，走 Files API 传 `file_id` 复用（免费），单图最多 384 tokens

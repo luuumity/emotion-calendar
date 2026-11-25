@@ -1,6 +1,6 @@
 # 用量与缓存的存储、口径与展示方案
 
-> 状态：记账已上线（2026-11-23，v16）；独立流水 `usage_events` 已上线（2026-11-24，v17）。用户侧展示未实现，本文只做方案记录。
+> 状态：记账已上线（2026-11-23，v16）；独立流水 `usage_events` 已上线（2026-11-24，v17）；用户侧用量页已上线（2026-11-25，`/usage`）。金额估算仍未实现。
 
 ## 1. 数据存在哪
 
@@ -59,7 +59,7 @@ DB_PATH=/opt/emotion-calendar/data/emotion.db node server/scripts/usage-summary.
 - 缓存命中率 = `hit / (hit + miss)`；`hit + miss` 为空时显示“-”。
 - 数据从 2026-11-23 起才有明细；此前历史行新字段为 0，展示时标注起始日期，不回填。
 
-## 3. 给用户展示需要改什么（未实现）
+## 3. 用户侧展示（已上线）
 
 ### 3.1 迁移 v17（已完成）
 
@@ -67,31 +67,35 @@ DB_PATH=/opt/emotion-calendar/data/emotion.db node server/scripts/usage-summary.
 - 回填脚本已提供，可重复执行；历史行没有明细的保持不造数。
 - 不再给 `chat_messages` 加累计字段：展示直接从 `usage_events` 求和。
 
-### 3.2 只读接口
+### 3.2 只读接口（已上线）
 
-`GET /api/usage/summary?days=30`，仅返回当前登录用户：
+`GET /api/usage/summary?range=month|30d`，仅返回当前登录用户；`range` 缺省为 `month`，按用户时区计算本月起点。响应：
 
 ```json
 {
-  "since": "2026-11-16",
-  "chat": { "calls": 54, "input": 175519, "output": 12000, "total": 187519, "hitRate": 0.62 },
-  "reports": [
-    { "scope": "single", "calls": 3, "input": 90000, "output": 6000, "total": 96000, "hitRate": 0.4 }
-  ],
-  "daily": [{ "day": "2026-11-20", "chat": 32000, "single": 0, "couple": 0 }]
+  "range": "month",
+  "startDate": "2026-11-01",
+  "trackedFrom": "2026-11-24",
+  "totals": { "calls": 12, "input": 120000, "output": 8000, "tokens": 128000, "hitRate": 0.61 },
+  "kinds": [
+    { "kind": "chat", "calls": 9, "input": 100000, "output": 7000, "tokens": 107000, "hitRate": 0.63 },
+    { "kind": "single", "calls": 2, "input": 18000, "output": 900, "tokens": 18900, "hitRate": 0.42 },
+    { "kind": "couple", "calls": 1, "input": 2000, "output": 100, "tokens": 2100, "hitRate": 0.3 }
+  ]
 }
 ```
 
-- 直接对 `usage_events` 按 `user_id` + `created_at` 聚合，不再关联会话/报告表。
-- 现查聚合即可；图表变慢再加 `usage_daily` 汇总表。
-- `(user_id, created_at)` 索引已建。
+- 直接对 `usage_events` 按 `user_id` + `created_at` 聚合，不关联会话/报告表。
+- `trackedFrom` 是该用户最早一条流水的日期，用于页面提示“统计自某日”。
+- 现查聚合；图表变慢再加 `usage_daily` 汇总表。
+- `(user_id, created_at)` 索引已在 v17 建立。
 
-### 3.3 前端
+### 3.3 前端（已上线）
 
-- 位置：「设置 → AI 分析」页底部，与定时报告开关相邻。
-- 内容：调用次数、输入/输出/总 token、缓存命中率，按聊天/单人/双人拆分；周期 7 天 / 30 天 / 本月。
-- 必须写清两条口径：输入是累计值；缓存命中率自 2026-11-23 起统计。
-- 若要显示金额，标注“按当前单价估算，实际以账单为准”。
+- 入口：设置页标题下方一张「AI 用量」卡片，不新增 tab；点开进入独立子页 `/usage`，可返回设置。
+- 内容：期间切换（本月 / 近 30 天）；总 token 大字，输入 / 输出 / 缓存命中率并排；下方按聊一聊、单人报告、双人报告三行展示占比条、输入输出、命中率与调用次数。
+- 底部说明两条口径：输入含每轮重发的历史；明细自 `trackedFrom` 起统计。
+- 不展示金额，也不做每日趋势；金额口径见第 4 节，暂不实现。
 
 ## 4. 金额估算
 
