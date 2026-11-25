@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, type Fact } from '../lib/api'
 import { errorMessage, useAuth } from '../context/AuthContext'
 import { AccessPanel } from './AccessPage'
@@ -428,6 +428,16 @@ export function SettingsPage() {
           <p className="sub">在这里管理谁能看到你的记录、每天几点提醒你，以及 Agent 记住的长期信息。</p>
         </div>
       </section>
+
+      <Link to="/usage" className="usage-entry">
+        <span className="usage-entry-main">
+          <span className="usage-entry-title">AI 用量</span>
+          <span className="usage-entry-sub">查看 token 消耗与缓存命中率</span>
+        </span>
+        <span className="usage-entry-arrow" aria-hidden="true">
+          ›
+        </span>
+      </Link>
 
       <div className="settings-tabs" role="tablist" aria-label="设置分类">
         <button

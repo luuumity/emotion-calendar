@@ -175,6 +175,23 @@ export type ChatMessage = {
   createdAt: string
 }
 
+export type UsageKind = 'chat' | 'single' | 'couple'
+
+export type UsageSummary = {
+  range: 'month' | '30d'
+  startDate: string
+  trackedFrom: string | null
+  totals: { calls: number; input: number; output: number; tokens: number; hitRate: number | null }
+  kinds: {
+    kind: UsageKind
+    calls: number
+    input: number
+    output: number
+    tokens: number
+    hitRate: number | null
+  }[]
+}
+
 export const api = {
   me: () => request<{ user: User }>('/auth/me'),
   login: (username: string, password: string) =>
@@ -312,5 +329,8 @@ export const api = {
       body: JSON.stringify(payload ? { coupleVisible, payload } : { coupleVisible })
     }),
   rejectProposal: (id: number) =>
-    request<{ proposal: ChatProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
+    request<{ proposal: ChatProposal }>(`/proposals/${id}/reject`, { method: 'POST' }),
+
+  // ---- AI 用量 ----
+  usageSummary: (range: 'month' | '30d') => request<UsageSummary>(`/usage/summary?range=${range}`)
 }

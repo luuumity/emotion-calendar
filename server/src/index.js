@@ -13,6 +13,7 @@ import tagsRoutes from './routes/tags.js'
 import insightsRoutes from './routes/insights.js'
 import chatRoutes from './routes/chat.js'
 import proposalRoutes from './routes/proposals.js'
+import usageRoutes from './routes/usage.js'
 import { startReminderScheduler } from './push.js'
 import { startInsightScheduler } from './lib/insight-scheduler.js'
 
@@ -44,6 +45,7 @@ app.use('/api/tags', tagsRoutes)
 app.use('/api/insights', insightsRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/proposals', proposalRoutes)
+app.use('/api/usage', usageRoutes)
 
 app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在' }))
 

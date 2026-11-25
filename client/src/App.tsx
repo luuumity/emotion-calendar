@@ -8,6 +8,7 @@ import { DayPage } from './pages/DayPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
+import { UsagePage } from './pages/UsagePage'
 
 function Splash() {
   return (
@@ -33,6 +34,7 @@ function Shell() {
         <Route path="/day/:date" element={<DayPage />} />
         <Route path="/access" element={<Navigate to="/settings?tab=access" replace />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/usage" element={<UsagePage />} />
         <Route path="/insights" element={<InsightsPage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
