@@ -132,7 +132,7 @@
 - [x] 报告：`insights` 已记 `prompt_tokens` / `completion_tokens` / 缓存命中 token
 - [x] 对话：`chat_messages` 已补 `completion_tokens` 与缓存命中 token；两处用量统一进 v17 `usage_events` 流水（删除会话不影响历史）
 - [ ] 个人总成本 = 单人报告 + 双人报告 + 实时对话三部分之和，可分别统计
-- [ ] 预算上限按用户维度累计（日/周），超限熔断；聚合查询依赖 `user_id + created_at` 索引
+- [ ] 预算上限按用户维度累计（月），达到上限后入口拦截（聊天每条消息、报告每次开始）；积分口径、配置与维护方式见 [usage-analytics.md §6](docs/usage-analytics.md)
 - [ ] 不记录逐 token 明细；缓存命中 token 只做汇总，不做逐条明细
 
 **时间口径（务必遵守）**
