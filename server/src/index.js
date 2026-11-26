@@ -56,7 +56,11 @@ app.use('/api', (_req, res) => res.status(404).json({ error: '接口不存在' }
 const clientDist = path.resolve(__dirname, '../../client/dist')
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist, { index: false, maxAge: '7d' }))
-  app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')))
+  app.get('*', (req, res) => {
+    // 分享页是公开链接，不参与搜索收录
+    if (req.path.startsWith('/s/')) res.setHeader('X-Robots-Tag', 'noindex, nofollow')
+    res.sendFile(path.join(clientDist, 'index.html'))
+  })
 } else {
   app.get('*', (_req, res) => {
     res.status(503).send('前端尚未构建。开发环境请运行 npm run dev，生产环境请先 npm run build。')
