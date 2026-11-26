@@ -26,8 +26,16 @@ function Shell() {
   const { user, loading } = useAuth()
   const location = useLocation()
 
-  // 公开分享页与登录态无关，且不套用应用布局
-  if (location.pathname.startsWith('/s/')) return <SharePage />
+  // 公开分享页与登录态无关，且不套用应用布局。
+  // 必须用 Route 承接 /s/:token，SharePage 里的 useParams 才拿得到 token。
+  if (location.pathname.startsWith('/s/')) {
+    return (
+      <Routes>
+        <Route path="/s/:token" element={<SharePage />} />
+        <Route path="*" element={<SharePage />} />
+      </Routes>
+    )
+  }
 
   if (loading) return <Splash />
   if (!user) return <LoginPage />

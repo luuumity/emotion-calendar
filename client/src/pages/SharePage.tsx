@@ -18,6 +18,10 @@ export function SharePage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!token) {
+      setError('链接不完整，请向分享者重新索取')
+      return
+    }
     let cancelled = false
     api
       .publicShare(token)
