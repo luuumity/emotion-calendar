@@ -4414,13 +4414,16 @@ a.chat-link-chip:hover {
 .share-head {
   width: min(720px, 100%);
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 18px;
 }
 
 .share-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--ink-soft);
@@ -4516,11 +4519,21 @@ a.chat-link-chip:hover {
 }
 
 .share-foot a {
-  color: var(--ink-soft);
+  display: inline-block;
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(242, 112, 95, 0.45);
+  background: var(--coral-soft);
+  color: var(--coral-deep);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 700;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .share-foot a:hover {
-  color: var(--ink);
+  background: var(--coral);
+  border-color: var(--coral);
+  color: #fff9f0;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(201, 80, 63, 0.22);
 }

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, type PublicChatShare } from '../lib/api'
 import { Markdown } from '../components/Markdown'
+import { CapsuleMark } from '../components/Layout'
 
 function formatDay(iso: string) {
   const d = new Date(iso)
@@ -72,7 +73,10 @@ export function SharePage() {
   return (
     <div className="share-page">
       <header className="share-head">
-        <span className="share-brand">情绪日历</span>
+        <span className="share-brand">
+          <CapsuleMark size={24} />
+          情绪日历
+        </span>
         <span className="share-meta">
           {formatDay(data.createdAt)} · {data.messages.length} 条消息
         </span>
