@@ -3366,8 +3366,13 @@ p {
 
 .chat-dialog-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.chat-dialog-actions .primary-btn.inline {
+  margin-top: 0;
 }
 
 .chat-dialog-danger {
