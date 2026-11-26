@@ -6,6 +6,7 @@ import { Router } from 'express'
 import { db } from '../db.js'
 import { requireUser } from '../auth.js'
 import { withLiveTagTarget } from '../lib/proposalView.js'
+import { checkFactAdd, FACT_MAX_CONTENT_CHARS } from '../lib/facts.js'
 
 const router = Router()
 router.use(requireUser)
@@ -95,7 +96,9 @@ function acceptFact(row, coupleVisible, override) {
         ? override.content.trim()
         : ''
       : baseContent
-  if (!content || content.length > 500) return { error: '事实内容需为 1-500 字', status: 400 }
+  if (!content || content.length > FACT_MAX_CONTENT_CHARS) {
+    return { error: `事实内容需为 1-${FACT_MAX_CONTENT_CHARS} 字`, status: 400 }
+  }
 
   const baseConfidence = Number(payload.confidence)
   const baseConf = Number.isInteger(baseConfidence) && baseConfidence >= 1 && baseConfidence <= 5 ? baseConfidence : 3
@@ -110,6 +113,8 @@ function acceptFact(row, coupleVisible, override) {
     const dup = db.prepare('SELECT * FROM facts WHERE user_id = ? AND content = ?').get(row.user_id, content)
     let factRow = dup
     if (!dup) {
+      const quota = checkFactAdd(row.user_id, content)
+      if (!quota.ok) return { error: quota.hint, status: 409 }
       const info = db
         .prepare(
           `INSERT INTO facts (user_id, content, confidence, source, source_ref_id, couple_visible, pinned, created_at, updated_at)

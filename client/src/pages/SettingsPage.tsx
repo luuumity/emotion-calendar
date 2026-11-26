@@ -20,6 +20,10 @@ type Status = {
   timezone: string
 }
 
+const FACT_MAX_COUNT = 100
+const FACT_MAX_TOTAL_CHARS = 8000
+const FACT_MAX_CONTENT_CHARS = 500
+
 function ReminderPanel() {
   const { user, refreshUser } = useAuth()
   const [status, setStatus] = useState<Status | null>(null)
@@ -285,7 +289,7 @@ function MemoryItem({
         <textarea
           className="memory-edit"
           value={text}
-          maxLength={500}
+          maxLength={FACT_MAX_CONTENT_CHARS}
           rows={2}
           autoFocus
           onChange={(e) => setText(e.target.value)}
@@ -379,6 +383,12 @@ function MemoryPanel() {
   }
 
   const sorted = [...facts].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.id - a.id)
+  const charCount = facts.reduce((sum, fact) => sum + fact.content.length, 0)
+  const countPct = (facts.length / FACT_MAX_COUNT) * 100
+  const charPct = (charCount / FACT_MAX_TOTAL_CHARS) * 100
+  const usedPct = Math.min(100, Math.round(Math.max(countPct, charPct)))
+  const full = facts.length >= FACT_MAX_COUNT || charCount >= FACT_MAX_TOTAL_CHARS
+  const near = !full && usedPct >= 80
 
   return (
     <div>
@@ -386,14 +396,31 @@ function MemoryPanel() {
         Agent 在对话中了解到的长期信息会先征求你的确认，确认后才出现在这里。你可以随时修改、置顶、控制是否对另一半可见，或删除。
       </p>
 
+      {!loading && (
+        <div className={'memory-quota' + (full ? ' full' : near ? ' near' : '')}>
+          <div className="memory-quota-head">
+            <span>记忆容量</span>
+            <span>
+              {facts.length} / {FACT_MAX_COUNT} 条 · {charCount} / {FACT_MAX_TOTAL_CHARS} 字
+            </span>
+          </div>
+          <div className="memory-quota-track" aria-hidden="true">
+            <span className="memory-quota-fill" style={{ width: `${usedPct}%` }} />
+          </div>
+          {full && <p>记忆已满，新增会被阻止。请先合并、精简或删除一些。</p>}
+          {near && <p>已接近上限，建议先整理一下。</p>}
+        </div>
+      )}
+
       <form className="memory-add" onSubmit={add}>
         <input
           value={draft}
-          maxLength={500}
-          placeholder="添加一条，例如：不喜欢香菜"
+          maxLength={FACT_MAX_CONTENT_CHARS}
+          placeholder={full ? '记忆已满，请先整理' : '添加一条，例如：不喜欢香菜'}
+          disabled={full}
           onChange={(e) => setDraft(e.target.value)}
         />
-        <button type="submit" className="primary-btn" disabled={busy || !draft.trim()}>
+        <button type="submit" className="primary-btn" disabled={busy || full || !draft.trim()}>
           {busy ? '添加中…' : '添加'}
         </button>
       </form>

@@ -4,6 +4,7 @@
 import { Router } from 'express'
 import { db } from '../db.js'
 import { requireUser } from '../auth.js'
+import { checkFactAdd, checkFactUpdate, FACT_MAX_CONTENT_CHARS } from '../lib/facts.js'
 
 const router = Router()
 router.use(requireUser)
@@ -26,7 +27,7 @@ const CONFIDENCE_RE = /^[1-5]$/
 function toContent(input) {
   if (typeof input !== 'string') return null
   const trimmed = input.trim()
-  if (!trimmed || trimmed.length > 500) return null
+  if (!trimmed || trimmed.length > FACT_MAX_CONTENT_CHARS) return null
   return trimmed
 }
 
@@ -70,7 +71,7 @@ router.get('/', (req, res) => {
 
 router.post('/', (req, res) => {
   const content = toContent(req.body?.content)
-  if (!content) return res.status(400).json({ error: '事实内容需为 1-500 字的文本' })
+  if (!content) return res.status(400).json({ error: `事实内容需为 1-${FACT_MAX_CONTENT_CHARS} 字的文本` })
 
   const confidence = toConfidence(req.body?.confidence) ?? 3
   const source = toSource(req.body?.source)
@@ -82,6 +83,9 @@ router.post('/', (req, res) => {
   // 查重：同用户已存在完全相同内容的，返回 409
   const dup = db.prepare('SELECT id FROM facts WHERE user_id = ? AND content = ?').get(req.user.id, content)
   if (dup) return res.status(409).json({ error: '已存在相同内容的事实', existingId: dup.id })
+
+  const quota = checkFactAdd(req.user.id, content)
+  if (!quota.ok) return res.status(409).json({ error: quota.hint, usage: quota.usage })
 
   const info = INSERT.run(req.user.id, content, confidence, source, sourceRefId, coupleVisible, pinned, now, now)
   res.status(201).json({ fact: view(SELECT_ONE.get(info.lastInsertRowid, req.user.id)) })
@@ -96,7 +100,7 @@ router.put('/:id', (req, res) => {
   let content = row.content
   if (req.body?.content !== undefined) {
     const next = toContent(req.body.content)
-    if (!next) return res.status(400).json({ error: '内容需为 1-500 字的文本，并去掉首尾空白' })
+    if (!next) return res.status(400).json({ error: `内容需为 1-${FACT_MAX_CONTENT_CHARS} 字的文本，并去掉首尾空白` })
     content = next
   }
 
@@ -105,6 +109,11 @@ router.put('/:id', (req, res) => {
     const next = toConfidence(req.body.confidence)
     if (!next) return res.status(400).json({ error: '置信度需为 1-5 的整数' })
     confidence = next
+  }
+
+  if (content !== row.content) {
+    const quota = checkFactUpdate(req.user.id, row.content, content)
+    if (!quota.ok) return res.status(409).json({ error: quota.hint, usage: quota.usage })
   }
 
   const source = req.body?.source !== undefined ? toSource(req.body.source) : row.source

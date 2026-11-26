@@ -13,6 +13,7 @@ import { FUNCTION_TOOLS } from '../lib/tools.js'
 import { runWithTools } from '../lib/tool-loop.js'
 import { withLiveTagTarget } from '../lib/proposalView.js'
 import { recordUsageEvent } from '../lib/usage-events.js'
+import { buildFactsBlock } from '../lib/facts.js'
 
 const router = Router()
 router.use(requireUser)
@@ -153,13 +154,84 @@ function shiftDay(day, delta) {
   return d.toISOString().slice(0, 10)
 }
 
+// 长期概览：只放聚合和索引，控制在 500 字内，避免把几个月原始记录塞进上下文。
+function buildLongTermOverview(userId, today, latestReportId) {
+  const d = new Date(`${today}T00:00:00Z`)
+  d.setUTCDate(1)
+  d.setUTCMonth(d.getUTCMonth() - 5)
+  const from = d.toISOString().slice(0, 10)
+
+  const months = db
+    .prepare(
+      `SELECT substr(day, 1, 7) AS month, COUNT(*) AS c, COUNT(DISTINCT day) AS days, AVG(score) AS avg
+       FROM records WHERE user_id = ? AND day >= ? AND day <= ?
+       GROUP BY month ORDER BY month ASC`
+    )
+    .all(userId, from, today)
+
+  const reportParams = [userId]
+  let reportWhere = `scope = 'single' AND user_id = ?`
+  if (latestReportId) {
+    reportWhere += ' AND id != ?'
+    reportParams.push(latestReportId)
+  }
+  const reports = db
+    .prepare(
+      `SELECT period_start, period_end, content FROM insights
+       WHERE ${reportWhere} ORDER BY period_start DESC LIMIT 3`
+    )
+    .all(...reportParams)
+
+  if (!months.length && !reports.length) return ''
+
+  const lines = ['【长期概览】']
+  if (months.length) {
+    const series = months
+      .map((m) => `${m.month} 均${Math.round(m.avg * 10) / 10}（${m.days} 天）`)
+      .join('；')
+    lines.push(`月度：${series}`)
+
+    const tags = db
+      .prepare(
+        `SELECT t.content, COUNT(*) AS c
+         FROM record_tags t JOIN records r ON r.id = t.record_id
+         WHERE t.user_id = ? AND r.day >= ? AND r.day <= ?
+         GROUP BY t.content ORDER BY c DESC, MAX(t.id) DESC LIMIT 5`
+      )
+      .all(userId, from, today)
+    if (tags.length) {
+      const tagText = tags
+        .map((t) => `#${String(t.content || '').replace(/\s+/g, '').slice(0, 16)}(${t.c})`)
+        .join(' ')
+      lines.push(`常见标签：${tagText}`)
+    }
+  }
+
+  if (reports.length) {
+    const reportText = reports
+      .map((r) => {
+        const text = String(r.content || '').replace(/\s+/g, ' ').trim()
+        const stop = text.search(/[。！？!?\n]/)
+        const first = (stop >= 0 ? text.slice(0, stop) : text).slice(0, 60)
+        return `${r.period_start}~${r.period_end} ${first}`
+      })
+      .join('；')
+    lines.push(`更早报告：${reportText}`)
+  }
+
+  const overview = lines.join('\n')
+  return overview.length > 500 ? `${overview.slice(0, 499)}…` : overview
+}
+
 // 记忆块：关于用户生活的跨会话知识（规则生成，不调模型）
-function buildMemoryBlock(userId) {
+export function buildMemoryBlock(userId) {
   const today = shanghaiToday()
   const from = shiftDay(today, -13)
 
   const report = db
-    .prepare('SELECT period_start, period_end, content FROM insights WHERE scope = ? AND user_id = ? ORDER BY period_start DESC LIMIT 1')
+    .prepare(
+      'SELECT id, period_start, period_end, content FROM insights WHERE scope = ? AND user_id = ? ORDER BY period_start DESC LIMIT 1'
+    )
     .get('single', userId)
 
   const records = db
@@ -180,6 +252,8 @@ function buildMemoryBlock(userId) {
   }
 
   const lines = ['【记忆】', `今天是 ${today}。`]
+  const overview = buildLongTermOverview(userId, today, report?.id)
+  if (overview) lines.push(overview)
   if (report) {
     const text = String(report.content || '').replace(/\s+/g, ' ').slice(0, 300)
     lines.push(`最近一份自我分析（${report.period_start} ~ ${report.period_end}）：${text}`)
@@ -196,14 +270,6 @@ function buildMemoryBlock(userId) {
     lines.push('近 14 天没有记录。')
   }
   return lines.join('\n')
-}
-
-function buildFactsBlock(userId) {
-  const facts = db
-    .prepare('SELECT content FROM facts WHERE user_id = ? ORDER BY pinned DESC, id ASC LIMIT 30')
-    .all(userId)
-  if (!facts.length) return ''
-  return '【关于用户的稳定事实】\n' + facts.map((f) => `- ${f.content}`).join('\n')
 }
 
 function parseJson(text) {

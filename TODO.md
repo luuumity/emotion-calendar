@@ -10,9 +10,9 @@
 |---|---|---|
 | 数据库迁移 v13 | 已完成 | v13 新增自动周报三态开关与失败重试字段；v12 为 `record_tags` 唯一约束 |
 | 会话压缩摘要 | 已完成 | 未压缩历史估算 token > 4000 或消息 > 40 条时压缩，保留最近 6 条；切点会回退到 assistant，避免保留区以孤儿回答开头；用实测 usage 校准比例；失败降级 |
-| 主动查询工具 | 已完成 | `get_days` / `get_tags` / `get_record` / `get_report` / `get_range_stats` / `get_facts` / `search_records`；统一 `limit + offset`；单次结果 > 6000 字符返回提示；重复调用拒绝；15 步熔断 |
+| 主动查询工具 | 已完成 | `get_days` / `get_tags` / `get_record` / `get_report` / `get_range_stats` / `search_records`；统一 `limit + offset`；单次结果 > 6000 字符返回提示；重复调用拒绝；15 步熔断；`search_records` 支持多关键词、理由 + 标签、分值区间 |
 | 提议闭环 | 已完成 | fact / tag / report 三类提议；卡片可编辑后采纳；新消息发送时剩余 pending 作废；处理结果以临时 system 汇总 |
-| 长期记忆页 | 已完成 | 设置页「长期记忆」tab：增删改、置顶、控制对另一半可见；聊天侧栏有入口 |
+| 长期记忆页 | 已完成 | 设置页「长期记忆」tab：增删改、置顶、控制对另一半可见；显示 100 条 / 8,000 字额度，满额阻止新增；聊天侧栏有入口 |
 | 数据库迁移 v5 | 已完成 | facts / record_tags / insights / couple_memory / chat_sessions / chat_messages |
 | 分值微调（后端） | 已完成 | `PUT /api/records/:id` 接受 score；original_score / adjusted_at |
 | 分值微调（前端） | 已完成 | 滑杆 + −/+，「已调过」标记；**无 5 秒撤销** |
@@ -38,7 +38,7 @@
 | `/share` 落地页 + share_target | 未做 | 方案已定：5 色球 + 预填链接；后端无需改 |
 | 双人阶段二 fork 对谈 | 未做 | 目前是阶段一双 persona 单调用 |
 | 会话分享 | 已完成（2026-11-26） | 快照式公开只读页 `/s/{token}`；只存 `role/content`，不含提议卡片、引用、facts；撤销即失效；删会话不影响已分享内容；单次上限 300 条 / 20 万字符；接口与 HTML 均 noindex；公开接口按 IP 限流；工具栏分享按钮进入多选，可分享消息子集；已有链接且选择不同时确认后作废旧链接重建 |
-| 聊天长期记忆与检索 | 方案已定（未实施） | facts 改为限量存储 + 全量注入；`search_records` 扩展为多关键词跨字段；记忆块增加长期概览；见 §2.16 |
+| 聊天长期记忆与检索 | 已完成（v1.1.0） | facts 限量存储 + 全量注入；`search_records` 多关键词跨字段；记忆块长期概览；见 §2.16 |
 | AI 设置页（联网开关等） | 未做 | `read_url` 恒定开启，无开关 |
 
 已定的产品约定（避免重复讨论）：
@@ -588,7 +588,7 @@ Agent 不能直接写库：只能通过 `propose_fact` / `propose_tag` / `propos
 被动注入的固定策略容易过时，改为「少量稳定上下文 + 按需取数」：
 
 - 常驻只保留：system、facts、近 14 天记录摘要、最近一份报告摘要、压缩摘要
-- 只读工具（已实现）：`get_days`、`get_tags`、`get_record`、`get_report`、`get_range_stats`、`get_facts`、`search_records`，统一 `limit + offset`
+- 只读工具（已实现）：`get_days`、`get_tags`、`get_record`、`get_report`、`get_range_stats`、`search_records`，统一 `limit + offset`；facts 改为额度内全量注入，不再提供 `get_facts`
 - 限制：单次结果 > 6000 字符不返回半截数据，返回 `result_too_large` 提示让模型缩小范围；单次跨度 ≤90 天、≤60 条；相同参数重复调用拒绝；`MAX_TOOL_STEPS=15` 仅作熔断，不做轮次产品限制
 - 冷启动（无报告）：首份单人报告在生成时强制为「第一条记录 → 今天」的 `manual` 全量区间；Agent 仍可按需 `get_days` 读全量
 - 报告生成不走工具：周期固定、需要确定性，直接注入记录
@@ -717,9 +717,11 @@ propose_record({ day, score, note? })
 - 压缩频率与摘要质量尚未在真实用户的自然长会话上观察；session 17 的填充内容是合成的。
 - 被压缩任务的查询日志会停止注入；追问很旧的任务时只能依赖摘要，必要时重查。超过 6 个旧任务的失败不会进入 prompt。
 
-#### 2.16 聊天长期记忆与检索（2026-11-26 定，未实施）
+#### 2.16 聊天长期记忆与检索（2026-11-26 已实施，v1.1.0）
 
-**背景：现在实际预注入的内容**
+实施版本：v1.1.0（2026-11-26）。facts 双上限、全量注入、`search_records` 跨字段、长期概览、prompt 检索规则均已落地；第二层服务端自动预检索仍待观察后再决定。
+
+**背景：改造前实际预注入的内容**
 
 | 内容 | 范围与截断 |
 |---|---|
@@ -733,6 +735,13 @@ propose_record({ day, score, note? })
 | 提议处理通知 | 上轮之后用户采纳/拒绝/作废的提议，临时注入，不落库 |
 
 跨会话的历史对话不注入；聊天只使用本人数据。
+
+**改造后（v1.1.0）**
+
+- facts：最多 100 条 / 8,000 字，按 `pinned DESC, updated_at DESC` 全量注入；超限阻止新增，不自动删除；`get_facts` 已下线。
+- 记忆块：新增近 6 个月长期概览（月度均分、常见标签、更早报告首句，≤500 字）。
+- `search_records`：支持 1-5 个关键词，同时搜理由和标签，支持日期与分值区间，按命中关键词数排序。
+- prompt：趋势、反复、原因、比较、关系模式类问题要求先检索并说明时间范围；超过 14 天必须检索。
 
 **问题**
 

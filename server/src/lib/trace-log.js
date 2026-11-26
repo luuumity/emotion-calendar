@@ -58,16 +58,12 @@ function callArgs(name, args) {
       if (a.offset != null) parts.push(`offset=${a.offset}`)
       return `get_report(${parts.join(', ')})`
     }
-    case 'get_facts': {
-      const parts = []
-      if (a.query) parts.push(`query=${JSON.stringify(clean(a.query, 24))}`)
-      if (a.limit != null) parts.push(`limit=${a.limit}`)
-      if (a.offset != null) parts.push(`offset=${a.offset}`)
-      return `get_facts(${parts.join(', ')})`
-    }
     case 'search_records': {
-      const parts = [`query=${JSON.stringify(clean(a.query, 24))}`]
+      const keywords = Array.isArray(a.keywords) ? a.keywords : a.query ? [a.query] : []
+      const parts = [`keywords=${JSON.stringify(keywords.map((k) => clean(k, 24)).join(' '))}`]
       if (a.start && a.end) parts.push(rangeText(a.start, a.end))
+      if (a.scoreMin != null) parts.push(`scoreMin=${a.scoreMin}`)
+      if (a.scoreMax != null) parts.push(`scoreMax=${a.scoreMax}`)
       if (a.limit != null) parts.push(`limit=${a.limit}`)
       if (a.offset != null) parts.push(`offset=${a.offset}`)
       return `search_records(${parts.join(', ')})`
@@ -173,8 +169,6 @@ function resultSummary(name, args, status, error, output) {
       }
       return listSummary(out, '份')
     }
-    case 'get_facts':
-      return listSummary(out, '条')
     case 'search_records': {
       const parts = [listSummary(out, '条')]
       const hits = (Array.isArray(out.items) ? out.items : [])

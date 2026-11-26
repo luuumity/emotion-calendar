@@ -2563,6 +2563,61 @@ p {
   border-color: var(--coral);
 }
 
+.memory-quota {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 253, 248, 0.7);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.memory-quota-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.memory-quota-track {
+  height: 5px;
+  margin-top: 9px;
+  border-radius: 999px;
+  background: rgba(47, 42, 37, 0.08);
+  overflow: hidden;
+}
+
+.memory-quota-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--sage);
+  transition: width 180ms ease;
+}
+
+.memory-quota.near .memory-quota-fill {
+  background: #d69b45;
+}
+
+.memory-quota.full .memory-quota-fill {
+  background: var(--coral-deep);
+}
+
+.memory-quota p {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+
+.memory-quota.full p {
+  color: var(--coral-deep);
+}
+
+.memory-add input:disabled {
+  background: rgba(47, 42, 37, 0.04);
+  color: var(--ink-faint);
+}
+
 .memory-list {
   list-style: none;
   padding: 0;

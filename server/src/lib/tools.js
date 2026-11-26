@@ -3,6 +3,7 @@
 
 import { db } from '../db.js'
 import { scoreLabel } from './score-labels.js'
+import { checkFactAdd, FACT_MAX_CONTENT_CHARS } from './facts.js'
 
 const MAX_RESULT_CHARS = 6000   // 单次结果字符上限（约 4000 token）
 const MAX_SPAN_DAYS = 90        // 明细类查询的时间跨度上限
@@ -187,35 +188,25 @@ export const FUNCTION_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'get_facts',
-      description:
-        '读取用户的长期事实。预注入只包含前 30 条；需要查看或搜索更多事实时使用。返回 total/returned/nextOffset/items。',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '可选关键词，1-50 字；按内容子串匹配' },
-          limit: { type: 'integer', description: '本页条数，默认 20，最大 100' },
-          offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
-        }
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'search_records',
       description:
-        '在理由中搜索关键词，返回匹配记录和上下文片段。适合定位某件事发生在哪几天。不传日期则搜索全部历史；返回 total/returned/nextOffset/items。',
+        '在记录理由和 AI 标签中搜索关键词，返回匹配记录和上下文片段。适合定位某件事发生在哪几天，或找同一主题下分值高低不同的记录。多个关键词默认 OR，按命中关键词数量排序；可用 scoreMin/scoreMax 限定分值方向。不传日期则搜索全部历史；返回 keywords/total/returned/nextOffset/items。facts 已全部注入，不需要用这个工具查 facts。',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '搜索关键词，1-50 字' },
-          start: { type: 'string', description: '可选起始日期，YYYY-MM-DD（包含）' },
-          end: { type: 'string', description: '可选结束日期，YYYY-MM-DD（包含）' },
+          keywords: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '1-5 个关键词，每个 1-50 字，总长度不超过 100 字；多个关键词默认 OR'
+          },
+          start: { type: 'string', description: '可选起始日期，YYYY-MM-DD（包含）；和 end 同时提供' },
+          end: { type: 'string', description: '可选结束日期，YYYY-MM-DD（包含）；和 start 同时提供' },
+          scoreMin: { type: 'integer', description: '可选最低分值 0-100，用于找低分记录' },
+          scoreMax: { type: 'integer', description: '可选最高分值 0-100，用于找高分记录' },
           limit: { type: 'integer', description: '本页条数，默认 20，最大 50' },
           offset: { type: 'integer', description: '跳过多少条，默认 0；通常传上一页的 nextOffset' }
         },
-        required: ['query']
+        required: ['keywords']
       }
     }
   },
@@ -645,49 +636,40 @@ function getRangeStats(userId, args) {
   }
 }
 
-function getFacts(userId, args) {
-  const page = pageArgs(args, 100)
-  if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
+function parseSearchKeywords(args) {
+  let raw = args?.keywords
+  // 兼容旧参数：模型偶尔仍会传 query
+  if ((raw === undefined || raw === null || raw === '') && args?.query !== undefined) raw = [args.query]
+  if (typeof raw === 'string') raw = raw.split(/[\s,，、]+/)
+  if (!Array.isArray(raw)) return { error: 'keywords 需要是 1-5 个关键词组成的数组' }
 
-  let query = null
-  if (args?.query !== undefined && args?.query !== null) {
-    query = String(args.query).trim()
-    if (!query || query.length > 50) {
-      return { ok: false, reason: 'bad_args', hint: 'query 需要是 1 到 50 个字符' }
-    }
+  const list = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const keyword = item.trim()
+    if (!keyword) continue
+    if (keyword.length > 50) return { error: '每个关键词需要是 1-50 个字符' }
+    if (!list.some((x) => x.toLowerCase() === keyword.toLowerCase())) list.push(keyword)
   }
+  if (!list.length) return { error: '至少提供一个关键词' }
+  if (list.length > 5) return { error: '一次最多提供 5 个关键词' }
+  if (list.join('').length > 100) return { error: '关键词总长度不能超过 100 字' }
+  return { keywords: list }
+}
 
-  const where = query ? `user_id = ? AND content LIKE ? ESCAPE '\\'` : 'user_id = ?'
-  const params = query ? [userId, `%${escapeLike(query)}%`] : [userId]
-  const total = db.prepare(`SELECT COUNT(*) AS c FROM facts WHERE ${where}`).get(...params).c
-  const rows = db
-    .prepare(
-      `SELECT id, content, confidence, pinned FROM facts
-       WHERE ${where}
-       ORDER BY pinned DESC, confidence DESC, id DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(...params, page.limit, page.offset)
-
-  const out = {
-    ok: true,
-    ...pageMeta(total, page.offset, rows.length),
-    items: rows.map((r) => ({
-      id: r.id,
-      content: String(r.content || ''),
-      confidence: r.confidence,
-      pinned: Boolean(r.pinned)
-    }))
+function optionalScore(value, label) {
+  if (value === undefined || value === null || value === '') return { value: null }
+  const n = Number(value)
+  if (!Number.isInteger(n) || n < 0 || n > 100) {
+    return { error: `${label} 需要是 0-100 的整数` }
   }
-  if (query) out.query = query
-  return out
+  return { value: n }
 }
 
 function searchRecords(userId, args) {
-  const query = String(args?.query ?? '').trim()
-  if (!query || query.length > 50) {
-    return { ok: false, reason: 'bad_args', hint: 'query 需要是 1 到 50 个字符' }
-  }
+  const parsed = parseSearchKeywords(args)
+  if (parsed.error) return { ok: false, reason: 'bad_args', hint: parsed.error }
+  const keywords = parsed.keywords
 
   const hasStart = args?.start !== undefined && args?.start !== null && String(args.start).trim() !== ''
   const hasEnd = args?.end !== undefined && args?.end !== null && String(args.end).trim() !== ''
@@ -704,42 +686,121 @@ function searchRecords(userId, args) {
     end = range.end
   }
 
+  const scoreMin = optionalScore(args?.scoreMin, 'scoreMin')
+  if (scoreMin.error) return { ok: false, reason: 'bad_args', hint: scoreMin.error }
+  const scoreMax = optionalScore(args?.scoreMax, 'scoreMax')
+  if (scoreMax.error) return { ok: false, reason: 'bad_args', hint: scoreMax.error }
+  if (scoreMin.value != null && scoreMax.value != null && scoreMin.value > scoreMax.value) {
+    return { ok: false, reason: 'bad_args', hint: 'scoreMin 不能大于 scoreMax' }
+  }
+
   const page = pageArgs(args, 50)
   if (page.error) return { ok: false, reason: 'bad_args', hint: page.error }
 
-  const clauses = ['user_id = ?', `note LIKE ? ESCAPE '\\'`]
-  const params = [userId, `%${escapeLike(query)}%`]
-  if (hasStart) {
-    clauses.push('day >= ? AND day <= ?')
-    params.push(start, end)
-  }
-  const where = clauses.join(' AND ')
+  const matchCond = `(r.note LIKE ? ESCAPE '\\' OR EXISTS (
+    SELECT 1 FROM record_tags t
+    WHERE t.record_id = r.id AND t.user_id = r.user_id AND t.content LIKE ? ESCAPE '\\'
+  ))`
 
-  const total = db.prepare(`SELECT COUNT(*) AS c FROM records WHERE ${where}`).get(...params).c
+  const whereParts = [`r.user_id = ?`, `(${keywords.map(() => matchCond).join(' OR ')})`]
+  const whereParams = [userId]
+  const likes = keywords.map((keyword) => `%${escapeLike(keyword)}%`)
+  for (const like of likes) whereParams.push(like, like)
+
+  if (hasStart) {
+    whereParts.push('r.day >= ? AND r.day <= ?')
+    whereParams.push(start, end)
+  }
+  if (scoreMin.value != null) {
+    whereParts.push('r.score >= ?')
+    whereParams.push(scoreMin.value)
+  }
+  if (scoreMax.value != null) {
+    whereParts.push('r.score <= ?')
+    whereParams.push(scoreMax.value)
+  }
+  const where = whereParts.join(' AND ')
+
+  const rankExpr = keywords.map(() => `(CASE WHEN ${matchCond} THEN 1 ELSE 0 END)`).join(' + ')
+  const rankParams = likes.flatMap((like) => [like, like])
+
+  const total = db.prepare(`SELECT COUNT(*) AS c FROM records r WHERE ${where}`).get(...whereParams).c
   const rows = db
     .prepare(
-      `SELECT id, day, score, note FROM records
+      `SELECT r.id, r.day, r.score, r.note,
+         (SELECT COUNT(*) FROM records r2
+          WHERE r2.user_id = r.user_id AND r2.day = r.day AND r2.id <= r.id) AS index_in_day,
+         (${rankExpr}) AS match_count
+       FROM records r
        WHERE ${where}
-       ORDER BY day DESC, id DESC
+       ORDER BY match_count DESC, r.day DESC, r.id DESC
        LIMIT ? OFFSET ?`
     )
-    .all(...params, page.limit, page.offset)
+    .all(...rankParams, ...whereParams, page.limit, page.offset)
+
+  const tagsByRecord = {}
+  if (rows.length) {
+    const ids = rows.map((r) => r.id)
+    const placeholders = ids.map(() => '?').join(',')
+    const tags = db
+      .prepare(
+        `SELECT record_id, tag_type, content FROM record_tags
+         WHERE user_id = ? AND record_id IN (${placeholders})
+         ORDER BY id ASC`
+      )
+      .all(userId, ...ids)
+    for (const tag of tags) {
+      const list = tagsByRecord[tag.record_id] || (tagsByRecord[tag.record_id] = [])
+      list.push(tag)
+    }
+  }
+
+  const lowerKeywords = keywords.map((k) => k.toLowerCase())
+  const firstHit = (text) => lowerKeywords.findIndex((k) => String(text || '').toLowerCase().includes(k))
+
+  const items = rows.map((row) => {
+    const note = String(row.note || '')
+    const noteIndex = firstHit(note)
+    const tags = tagsByRecord[row.id] || []
+    const matchedTag = tags.find((tag) => firstHit(tag.content) >= 0)
+    const noteHit = noteIndex >= 0
+    const tagHit = Boolean(matchedTag)
+
+    const item = {
+      id: row.id,
+      day: row.day,
+      indexInDay: row.index_in_day,
+      score: row.score
+    }
+    if (noteHit) item.snippet = makeSnippet(note, keywords[noteIndex])
+    else if (tagHit) item.snippet = makeSnippet(matchedTag.content, keywords[firstHit(matchedTag.content)])
+    else if (note) item.snippet = makeSnippet(note, '')
+
+    const tag = matchedTag || tags[0]
+    if (tag) {
+      const content = String(tag.content || '')
+      item.tag = {
+        tagType: tag.tag_type,
+        content: content.slice(0, 120),
+        contentTruncated: content.length > 120
+      }
+    }
+    item.matchedIn = noteHit && tagHit ? 'both' : noteHit ? 'note' : 'tag'
+    return item
+  })
 
   const out = {
     ok: true,
-    query,
-    ...pageMeta(total, page.offset, rows.length),
-    items: rows.map((r) => ({
-      id: r.id,
-      day: r.day,
-      score: r.score,
-      snippet: makeSnippet(r.note, query)
-    }))
+    keywords,
+    ...pageMeta(total, page.offset, items.length),
+    items
   }
   if (hasStart) {
     out.start = start
     out.end = end
   }
+  if (scoreMin.value != null) out.scoreMin = scoreMin.value
+  if (scoreMax.value != null) out.scoreMax = scoreMax.value
   return out
 }
 
@@ -801,8 +862,8 @@ function insertProposal(ctx, kind, payload) {
 }
 
 function proposeFact(ctx, args) {
-  const content = normText(args?.content, 500)
-  if (!content) return { ok: false, reason: 'bad_args', hint: '事实内容需为 1-500 字的文本' }
+  const content = normText(args?.content, FACT_MAX_CONTENT_CHARS)
+  if (!content) return { ok: false, reason: 'bad_args', hint: `事实内容需为 1-${FACT_MAX_CONTENT_CHARS} 字的文本` }
 
   const confidence = Number(args?.confidence)
   const conf = Number.isInteger(confidence) && confidence >= 1 && confidence <= 5 ? confidence : 3
@@ -811,6 +872,10 @@ function proposeFact(ctx, args) {
   if (dup) {
     return { ok: false, reason: 'already_exists', factId: dup.id, hint: '这条事实已经在记忆里了，不需要再提。' }
   }
+
+  const quota = checkFactAdd(ctx.userId, content)
+  if (!quota.ok) return { ok: false, reason: quota.reason, hint: quota.hint }
+
   return insertProposal(ctx, 'fact', { content, confidence: conf })
 }
 
@@ -955,7 +1020,6 @@ export function executeTool(name, args, ctx) {
     else if (name === 'get_record') data = getRecord(userId, args)
     else if (name === 'get_report') data = getReport(userId, args)
     else if (name === 'get_range_stats') data = getRangeStats(userId, args)
-    else if (name === 'get_facts') data = getFacts(userId, args)
     else if (name === 'search_records') data = searchRecords(userId, args)
     else if (
       name === 'propose_fact' ||
@@ -980,8 +1044,7 @@ export function executeTool(name, args, ctx) {
       get_days: '结果过大。请减小 limit，或把 includeNotes 设为 false，或缩小日期范围。',
       get_tags: '结果过大。请减小 limit 或缩小日期范围。',
       get_report: '结果过大。请减小 limit。',
-      get_facts: '结果过大。请减小 limit 或提供更具体的 query。',
-      search_records: '结果过大。请减小 limit 或缩小日期范围。',
+      search_records: '结果过大。请减小 limit、减少关键词或缩小日期范围。',
       get_range_stats: '结果过大。请缩短日期范围。'
     }
     return JSON.stringify({
