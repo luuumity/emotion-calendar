@@ -175,6 +175,24 @@ export type ChatMessage = {
   createdAt: string
 }
 
+export type ChatShare = {
+  id: number
+  token: string
+  sessionId: number | null
+  title: string
+  revoked: boolean
+  viewCount: number
+  messageCount: number
+  createdAt: string
+}
+
+export type PublicChatShare = {
+  title: string
+  messages: { id: number; role: 'user' | 'assistant'; content: string }[]
+  createdAt: string
+  viewCount: number
+}
+
 export type UsageKind = 'chat' | 'single' | 'couple'
 
 export type UsageSummary = {
@@ -308,6 +326,11 @@ export const api = {
   patchChatSession: (id: number, title: string) =>
     request<{ session: ChatSession }>(`/chat/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   deleteChatSession: (id: number) => request<{ ok: true }>(`/chat/sessions/${id}`, { method: 'DELETE' }),
+  chatSessionShare: (id: number) => request<{ share: ChatShare | null }>(`/chat/sessions/${id}/share`),
+  createChatSessionShare: (id: number) =>
+    request<{ share: ChatShare; reused: boolean }>(`/chat/sessions/${id}/share`, { method: 'POST' }),
+  revokeChatShare: (id: number) => request<{ ok: true }>(`/chat/shares/${id}`, { method: 'DELETE' }),
+  publicShare: (token: string) => request<{ share: PublicChatShare }>(`/public/shares/${token}`),
   chatMessages: (sessionId: number) =>
     request<{ messages: ChatMessage[] }>(`/chat/sessions/${sessionId}/messages`),
   sendChatMessage: (

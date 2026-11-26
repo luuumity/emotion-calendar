@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { Layout } from './components/Layout'
 import { ScrollManager } from './components/ScrollManager'
@@ -9,6 +9,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { InsightsPage } from './pages/InsightsPage'
 import { ChatPage } from './pages/ChatPage'
 import { UsagePage } from './pages/UsagePage'
+import { SharePage } from './pages/SharePage'
 
 function Splash() {
   return (
@@ -23,6 +24,10 @@ function Splash() {
 
 function Shell() {
   const { user, loading } = useAuth()
+  const location = useLocation()
+
+  // 公开分享页与登录态无关，且不套用应用布局
+  if (location.pathname.startsWith('/s/')) return <SharePage />
 
   if (loading) return <Splash />
   if (!user) return <LoginPage />

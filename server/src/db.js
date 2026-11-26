@@ -434,6 +434,29 @@ const migrations = [
           ON usage_events(user_id, created_at);
       `)
     }
+  },
+  {
+    version: 18,
+    // 会话分享：生成时快照消息正文，独立于会话与消息表。
+    // 删除会话不影响已分享内容；撤销后 token 立即失效。
+    up() {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS chat_shares (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          token TEXT NOT NULL UNIQUE,
+          owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          session_id INTEGER,
+          title TEXT NOT NULL DEFAULT '',
+          messages TEXT NOT NULL,
+          revoked INTEGER NOT NULL DEFAULT 0,
+          view_count INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_shares_owner ON chat_shares(owner_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_shares_session_active
+          ON chat_shares(session_id) WHERE revoked = 0;
+      `)
+    }
   }
 ]
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, type ChatSession, type ChatMessage, type ChatProposal } from '../lib/api'
+import { api, type ChatSession, type ChatMessage, type ChatProposal, type ChatShare } from '../lib/api'
 import { Markdown } from '../components/Markdown'
 
 function formatTime(iso: string) {
@@ -79,6 +79,12 @@ export function ChatPage() {
   const [hint, setHint] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null)
   const [menuFor, setMenuFor] = useState<{ id: number; x: number; y: number } | null>(null)
+  const [shareFor, setShareFor] = useState<ChatSession | null>(null)
+  const [shareInfo, setShareInfo] = useState<ChatShare | null>(null)
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [shareError, setShareError] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -179,12 +185,70 @@ export function ChatPage() {
 
   function openSessionMenu(id: number, x: number, y: number) {
     const MENU_W = 160
-    const MENU_H = 48
+    const MENU_H = 88
     setMenuFor({
       id,
       x: Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8)),
       y: Math.max(8, Math.min(y, window.innerHeight - MENU_H - 8))
     })
+  }
+
+  async function openShare(sessionId: number) {
+    const target = sessions.find((s) => s.id === sessionId) || null
+    setShareFor(target)
+    setShareInfo(null)
+    setShareError('')
+    setCopied(false)
+    setShareLoading(true)
+    try {
+      const res = await api.chatSessionShare(sessionId)
+      setShareInfo(res.share)
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : '读取分享失败')
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
+  async function createShare() {
+    if (!shareFor) return
+    setShareBusy(true)
+    setShareError('')
+    try {
+      const res = await api.createChatSessionShare(shareFor.id)
+      setShareInfo(res.share)
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : '生成分享失败')
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  async function revokeShare() {
+    if (!shareInfo) return
+    setShareBusy(true)
+    setShareError('')
+    try {
+      await api.revokeChatShare(shareInfo.id)
+      setShareInfo(null)
+      setCopied(false)
+    } catch (e) {
+      setShareError(e instanceof Error ? e.message : '撤销失败')
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  async function copyShareLink() {
+    if (!shareInfo) return
+    const url = `${window.location.origin}/s/${shareInfo.token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setShareError('复制失败，请长按链接手动复制')
+    }
   }
 
   // 长按 480ms 记为触发；松手后再弹菜单，避免菜单刚好出现在手指下方被误点
@@ -479,6 +543,18 @@ export function ChatPage() {
               onClick={() => {
                 const id = menuFor.id
                 setMenuFor(null)
+                openShare(id)
+              }}
+            >
+              分享该会话
+            </button>
+            <button
+              type="button"
+              className="chat-session-menu-item"
+              role="menuitem"
+              onClick={() => {
+                const id = menuFor.id
+                setMenuFor(null)
                 setPendingDeleteId(id)
               }}
             >
@@ -509,6 +585,68 @@ export function ChatPage() {
                 删除
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {shareFor && (
+        <div className="chat-dialog-backdrop" onClick={() => setShareFor(null)}>
+          <div
+            className="chat-dialog share-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="分享该会话"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>分享这段对话</h3>
+            {shareLoading ? (
+              <p>正在检查分享状态…</p>
+            ) : shareInfo && !shareInfo.revoked ? (
+              <>
+                <p>拿到链接的人都能查看。内容已冻结，不包含提议卡片和内部记录。</p>
+                <input
+                  className="share-link"
+                  readOnly
+                  value={`${window.location.origin}/s/${shareInfo.token}`}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <div className="chat-dialog-actions">
+                  <button
+                    type="button"
+                    className="ghost-btn small"
+                    disabled={shareBusy}
+                    onClick={revokeShare}
+                  >
+                    撤销分享
+                  </button>
+                  <button type="button" className="primary-btn inline" onClick={copyShareLink}>
+                    {copied ? '已复制' : '复制链接'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>
+                  「{shareFor.title}」将生成一个公开链接
+                  {shareFor.messageCount ? `，包含当前 ${shareFor.messageCount} 条消息` : ''}
+                  。生成后内容不会随会话更新。
+                </p>
+                <div className="chat-dialog-actions">
+                  <button type="button" className="ghost-btn small" onClick={() => setShareFor(null)}>
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn inline"
+                    disabled={shareBusy}
+                    onClick={createShare}
+                  >
+                    {shareBusy ? '生成中…' : '生成链接'}
+                  </button>
+                </div>
+              </>
+            )}
+            {shareError && <p className="form-error">{shareError}</p>}
           </div>
         </div>
       )}
