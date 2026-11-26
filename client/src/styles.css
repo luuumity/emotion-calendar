@@ -3166,8 +3166,25 @@ p {
   justify-content: space-between;
 }
 
-.chat-new-btn {
+.chat-toolbar-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-icon-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.chat-new-btn {
+  margin-left: 0;
 }
 
 /* 侧边栏弹层的遮罩 */
@@ -3384,6 +3401,85 @@ p {
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+}
+
+/* 选择消息分享 */
+.chat-select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--line);
+  background: #fffaf1;
+}
+
+.chat-select-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.chat-select-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-messages.selecting {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chat-messages.selecting .markdown a {
+  pointer-events: none;
+}
+
+.chat-messages.selecting .chat-proposals {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.chat-bubble.selectable {
+  cursor: pointer;
+  padding-left: 38px;
+}
+
+.chat-bubble.selected {
+  box-shadow: 0 0 0 2px var(--coral);
+}
+
+.chat-select-box {
+  position: absolute;
+  left: 11px;
+  top: 12px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  background: #fffaf1;
+}
+
+.chat-bubble.user .chat-select-box {
+  background: transparent;
+  border-color: rgba(255, 249, 240, 0.55);
+}
+
+.chat-select-box.checked {
+  border-color: var(--coral);
+  background: var(--coral);
+}
+
+.chat-select-box.checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff9f0;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 .chat-bubble {
@@ -3788,6 +3884,10 @@ a.chat-link-chip:hover {
 
   .chat-messages {
     padding: 16px;
+  }
+
+  .chat-select-bar {
+    padding: 10px 16px;
   }
 
   .chat-bubble {

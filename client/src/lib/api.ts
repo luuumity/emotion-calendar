@@ -183,6 +183,7 @@ export type ChatShare = {
   revoked: boolean
   viewCount: number
   messageCount: number
+  messageIds: number[]
   createdAt: string
 }
 
@@ -327,8 +328,11 @@ export const api = {
     request<{ session: ChatSession }>(`/chat/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   deleteChatSession: (id: number) => request<{ ok: true }>(`/chat/sessions/${id}`, { method: 'DELETE' }),
   chatSessionShare: (id: number) => request<{ share: ChatShare | null }>(`/chat/sessions/${id}/share`),
-  createChatSessionShare: (id: number) =>
-    request<{ share: ChatShare; reused: boolean }>(`/chat/sessions/${id}/share`, { method: 'POST' }),
+  createChatSessionShare: (id: number, messageIds?: number[]) =>
+    request<{ share: ChatShare; reused: boolean }>(`/chat/sessions/${id}/share`, {
+      method: 'POST',
+      body: messageIds ? JSON.stringify({ messageIds }) : undefined
+    }),
   revokeChatShare: (id: number) => request<{ ok: true }>(`/chat/shares/${id}`, { method: 'DELETE' }),
   publicShare: (token: string) => request<{ share: PublicChatShare }>(`/public/shares/${token}`),
   chatMessages: (sessionId: number) =>

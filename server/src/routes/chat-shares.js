@@ -36,6 +36,15 @@ function messageCountOf(row) {
   }
 }
 
+function messageIdsOf(row) {
+  try {
+    const list = JSON.parse(row.messages)
+    return Array.isArray(list) ? list.map((item) => item.id).filter((id) => Number.isInteger(id)) : []
+  } catch {
+    return []
+  }
+}
+
 function shareView(row) {
   if (!row) return null
   return {
@@ -46,6 +55,7 @@ function shareView(row) {
     revoked: Boolean(row.revoked),
     viewCount: row.view_count,
     messageCount: messageCountOf(row),
+    messageIds: messageIdsOf(row),
     createdAt: row.created_at
   }
 }

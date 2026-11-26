@@ -85,6 +85,10 @@ export function ChatPage() {
   const [shareBusy, setShareBusy] = useState(false)
   const [shareError, setShareError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [shareIds, setShareIds] = useState<number[]>([])
+  const [shareConflict, setShareConflict] = useState(false)
 
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -124,6 +128,8 @@ export function ChatPage() {
     setActiveId(id)
     setMessages([])
     setError(null)
+    setSelecting(false)
+    setSelectedIds(new Set())
     if (!id) return
     try {
       const res = await api.chatMessages(id)
@@ -150,6 +156,8 @@ export function ChatPage() {
       setActiveId(res.session.id)
       setMessages([])
       setError(null)
+      setSelecting(false)
+      setSelectedIds(new Set())
       setSidebarOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : '创建失败')
@@ -185,7 +193,7 @@ export function ChatPage() {
 
   function openSessionMenu(id: number, x: number, y: number) {
     const MENU_W = 160
-    const MENU_H = 88
+    const MENU_H = 48
     setMenuFor({
       id,
       x: Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8)),
@@ -193,16 +201,61 @@ export function ChatPage() {
     })
   }
 
-  async function openShare(sessionId: number) {
+  function startSelecting() {
+    if (!activeSession) return
+    if (!selectableMessages.length) {
+      flashHint('当前会话还没有可分享的内容')
+      return
+    }
+    setSelecting(true)
+    setSelectedIds(new Set())
+    setSidebarOpen(false)
+  }
+
+  function exitSelecting() {
+    setSelecting(false)
+    setSelectedIds(new Set())
+  }
+
+  function toggleSelected(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(allSelected ? new Set() : new Set(selectableMessages.map((m) => m.id)))
+  }
+
+  function shareSelected() {
+    if (!activeSession || selectedIds.size === 0) return
+    const ids = selectableMessages.filter((m) => selectedIds.has(m.id)).map((m) => m.id)
+    setSelecting(false)
+    setSelectedIds(new Set())
+    openShare(activeSession.id, ids)
+  }
+
+  async function openShare(sessionId: number, ids: number[]) {
     const target = sessions.find((s) => s.id === sessionId) || null
     setShareFor(target)
+    setShareIds(ids)
     setShareInfo(null)
+    setShareConflict(false)
     setShareError('')
     setCopied(false)
     setShareLoading(true)
     try {
       const res = await api.chatSessionShare(sessionId)
-      setShareInfo(res.share)
+      const share = res.share
+      setShareInfo(share)
+      if (share && !share.revoked) {
+        const existing = [...share.messageIds].sort((a, b) => a - b)
+        const wanted = [...ids].sort((a, b) => a - b)
+        setShareConflict(existing.length !== wanted.length || existing.some((id, i) => id !== wanted[i]))
+      }
     } catch (e) {
       setShareError(e instanceof Error ? e.message : '读取分享失败')
     } finally {
@@ -215,8 +268,16 @@ export function ChatPage() {
     setShareBusy(true)
     setShareError('')
     try {
-      const res = await api.createChatSessionShare(shareFor.id)
+      // 已有快照且选择不同：确认后先撤销旧链接，再按当前选择生成
+      if (shareInfo && !shareInfo.revoked) {
+        await api.revokeChatShare(shareInfo.id)
+        setShareInfo(null)
+        setShareConflict(false)
+      }
+      const res = await api.createChatSessionShare(shareFor.id, shareIds)
       setShareInfo(res.share)
+      setSelecting(false)
+      setSelectedIds(new Set())
     } catch (e) {
       setShareError(e instanceof Error ? e.message : '生成分享失败')
     } finally {
@@ -356,6 +417,11 @@ export function ChatPage() {
 
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
   const nonEmptySessions = useMemo(() => sessions.filter((s) => s.messageCount > 0), [sessions])
+  const selectableMessages = useMemo(
+    () => messages.filter((m) => m.role === 'user' || m.role === 'assistant'),
+    [messages]
+  )
+  const allSelected = selectableMessages.length > 0 && selectedIds.size === selectableMessages.length
   const pendingDelete = useMemo(
     () => sessions.find((s) => s.id === pendingDeleteId) || null,
     [sessions, pendingDeleteId]
@@ -377,15 +443,43 @@ export function ChatPage() {
           >
             {sidebarOpen ? '收起' : '会话列表'}
           </button>
-          <button
-            type="button"
-            className="ghost-btn small chat-new-btn"
-            onClick={createAndSelect}
-            title="新建对话"
-            aria-label="新建对话"
-          >
-            ＋ 新对话
-          </button>
+          <div className="chat-toolbar-actions">
+            <button
+              type="button"
+              className="ghost-btn small chat-icon-btn"
+              onClick={startSelecting}
+              disabled={!activeSession || selectableMessages.length === 0 || sending || selecting}
+              title="选择消息分享"
+              aria-label="选择消息分享"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="ghost-btn small chat-new-btn"
+              onClick={createAndSelect}
+              title="新建对话"
+              aria-label="新建对话"
+            >
+              ＋ 新对话
+            </button>
+          </div>
         </div>
       </div>
 
@@ -453,7 +547,29 @@ export function ChatPage() {
             </div>
           ) : (
             <>
-              <div className="chat-messages" ref={listRef}>
+              {selecting && (
+                <div className="chat-select-bar">
+                  <span className="chat-select-count">已选 {selectedIds.size} 条</span>
+                  <div className="chat-select-actions">
+                    <button type="button" className="ghost-btn small" onClick={toggleSelectAll}>
+                      {allSelected ? '取消全选' : '全选'}
+                    </button>
+                    <button type="button" className="ghost-btn small" onClick={exitSelecting}>
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      className="primary-btn inline"
+                      disabled={selectedIds.size === 0 || shareLoading}
+                      onClick={shareSelected}
+                    >
+                      分享
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className={'chat-messages' + (selecting ? ' selecting' : '')} ref={listRef}>
                 {messages.length === 0 && !sending && (
                   <div className="chat-empty-inline">
                     跟懂你的 Persona Agent 聊一聊，它读过你的情绪日记、标签和过往分析。
@@ -461,7 +577,13 @@ export function ChatPage() {
                 )}
 
                 {messages.map((m) => (
-                  <Bubble key={m.id} message={m} />
+                  <Bubble
+                    key={m.id}
+                    message={m}
+                    selecting={selecting}
+                    selected={selectedIds.has(m.id)}
+                    onToggle={toggleSelected}
+                  />
                 ))}
 
                 {sending && (
@@ -509,14 +631,14 @@ export function ChatPage() {
                     rows={1}
                     placeholder="说点什么…"
                     value={input}
-                    disabled={sending}
+                    disabled={sending || selecting}
                     onChange={(e) => setInput(e.target.value)}
                   />
                   <button
                     type="button"
                     className="primary-btn"
                     onClick={send}
-                    disabled={sending || !input.trim()}
+                    disabled={sending || selecting || !input.trim()}
                   >
                     {sending ? '…' : '发送'}
                   </button>
@@ -536,18 +658,6 @@ export function ChatPage() {
             role="menu"
             aria-label="会话操作"
           >
-            <button
-              type="button"
-              className="chat-session-menu-item"
-              role="menuitem"
-              onClick={() => {
-                const id = menuFor.id
-                setMenuFor(null)
-                openShare(id)
-              }}
-            >
-              分享该会话
-            </button>
             <button
               type="button"
               className="chat-session-menu-item"
@@ -595,15 +705,17 @@ export function ChatPage() {
             className="chat-dialog share-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label="分享该会话"
+            aria-label="分享这段对话"
             onClick={(e) => e.stopPropagation()}
           >
             <h3>分享这段对话</h3>
             {shareLoading ? (
               <p>正在检查分享状态…</p>
-            ) : shareInfo && !shareInfo.revoked ? (
+            ) : shareInfo && !shareInfo.revoked && !shareConflict ? (
               <>
-                <p>拿到链接的人都能查看。内容已冻结，不包含提议卡片和内部记录。</p>
+                <p>
+                  拿到链接的人都能查看，包含已选的 {shareInfo.messageCount} 条消息。内容已冻结，不包含提议卡片和内部记录。
+                </p>
                 <input
                   className="share-link"
                   readOnly
@@ -624,12 +736,31 @@ export function ChatPage() {
                   </button>
                 </div>
               </>
+            ) : shareConflict && shareInfo ? (
+              <>
+                <p>
+                  这个会话已经有一条分享链接，包含 {shareInfo.messageCount} 条消息，和这次选择的不一样。
+                  重新生成会让旧链接立即失效。
+                </p>
+                <div className="chat-dialog-actions">
+                  <button type="button" className="ghost-btn small" onClick={() => setShareFor(null)}>
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn inline"
+                    disabled={shareBusy}
+                    onClick={createShare}
+                  >
+                    {shareBusy ? '生成中…' : '作废旧链接并生成'}
+                  </button>
+                </div>
+              </>
             ) : (
               <>
                 <p>
-                  「{shareFor.title}」将生成一个公开链接
-                  {shareFor.messageCount ? `，包含当前 ${shareFor.messageCount} 条消息` : ''}
-                  。生成后内容不会随会话更新。
+                  「{shareFor.title}」将生成一个公开链接，包含已选的 {shareIds.length} 条消息。
+                  生成后内容不会随会话更新。
                 </p>
                 <div className="chat-dialog-actions">
                   <button type="button" className="ghost-btn small" onClick={() => setShareFor(null)}>
@@ -654,12 +785,34 @@ export function ChatPage() {
   )
 }
 
-function Bubble({ message }: { message: ChatMessage }) {
+function Bubble({
+  message,
+  selecting,
+  selected,
+  onToggle
+}: {
+  message: ChatMessage
+  selecting: boolean
+  selected: boolean
+  onToggle: (id: number) => void
+}) {
   const isUser = message.role === 'user'
+  const canSelect = selecting && (message.role === 'user' || message.role === 'assistant')
   const proposals = message.proposals || []
   return (
     <>
-      <div className={'chat-bubble ' + (isUser ? 'user' : 'assistant')}>
+      <div
+        className={
+          'chat-bubble ' +
+          (isUser ? 'user' : 'assistant') +
+          (canSelect ? ' selectable' : '') +
+          (canSelect && selected ? ' selected' : '')
+        }
+        onClick={canSelect ? () => onToggle(message.id) : undefined}
+        role={canSelect ? 'button' : undefined}
+        aria-pressed={canSelect ? selected : undefined}
+      >
+        {canSelect && <span className={'chat-select-box' + (selected ? ' checked' : '')} aria-hidden />}
         {isUser ? (
           message.content.split('\n').map((line, i) => <p key={i}>{line || '\u00A0'}</p>)
         ) : (
