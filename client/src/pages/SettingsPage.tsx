@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api, type Fact } from '../lib/api'
 import { errorMessage, useAuth } from '../context/AuthContext'
@@ -23,6 +23,13 @@ type Status = {
 const FACT_MAX_COUNT = 100
 const FACT_MAX_TOTAL_CHARS = 8000
 const FACT_MAX_CONTENT_CHARS = 500
+const AUTOGROW_MAX_HEIGHT = 160
+
+function growTextarea(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, AUTOGROW_MAX_HEIGHT) + 'px'
+}
 
 function ReminderPanel() {
   const { user, refreshUser } = useAuth()
@@ -239,6 +246,11 @@ function MemoryItem({
   const [text, setText] = useState(fact.content)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const editRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    if (editing) growTextarea(editRef.current)
+  }, [editing, text])
 
   async function patch(next: { content?: string; pinned?: boolean; coupleVisible?: boolean }) {
     setBusy(true)
@@ -287,6 +299,7 @@ function MemoryItem({
 
       {editing ? (
         <textarea
+          ref={editRef}
           className="memory-edit"
           value={text}
           maxLength={FACT_MAX_CONTENT_CHARS}
@@ -352,6 +365,11 @@ function MemoryPanel() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const addRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    growTextarea(addRef.current)
+  }, [draft])
 
   useEffect(() => {
     api
@@ -413,8 +431,10 @@ function MemoryPanel() {
       )}
 
       <form className="memory-add" onSubmit={add}>
-        <input
+        <textarea
+          ref={addRef}
           value={draft}
+          rows={1}
           maxLength={FACT_MAX_CONTENT_CHARS}
           placeholder={full ? '记忆已满，请先整理' : '添加一条，例如：不喜欢香菜'}
           disabled={full}

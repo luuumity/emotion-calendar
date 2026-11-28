@@ -2542,11 +2542,12 @@ p {
 
 .memory-add {
   display: flex;
+  align-items: flex-end;
   gap: 8px;
   margin: 14px 0 10px;
 }
 
-.memory-add input {
+.memory-add textarea {
   flex: 1;
   min-width: 0;
   padding: 10px 12px;
@@ -2556,9 +2557,12 @@ p {
   color: var(--ink);
   font: inherit;
   font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  overflow-y: auto;
 }
 
-.memory-add input:focus {
+.memory-add textarea:focus {
   outline: none;
   border-color: var(--coral);
 }
@@ -2613,7 +2617,7 @@ p {
   color: var(--coral-deep);
 }
 
-.memory-add input:disabled {
+.memory-add textarea:disabled {
   background: rgba(47, 42, 37, 0.04);
   color: var(--ink-faint);
 }
@@ -2685,7 +2689,8 @@ p {
 
 .memory-edit {
   width: 100%;
-  resize: vertical;
+  resize: none;
+  overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 8px 10px;
